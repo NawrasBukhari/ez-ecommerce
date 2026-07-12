@@ -19,11 +19,10 @@ final class InboundWebhookController extends Controller
 
     public function __invoke(Request $request, string $gateway): JsonResponse
     {
-        $payload = $request->getContent();
+        $this->assertGatewayAllowed($gateway);
 
-        if ($gateway === 'stripe') {
-            $this->verifyStripeSignature($request, $payload);
-        }
+        $payload = $request->getContent();
+        $this->verifyInboundAccess($request, $gateway, $payload);
 
         $event = $this->reconcilePayment->execute(new WebhookRequestData(
             gateway: $gateway,
@@ -38,13 +37,47 @@ final class InboundWebhookController extends Controller
         ]);
     }
 
-    private function verifyStripeSignature(Request $request, string $payload): void
+    private function assertGatewayAllowed(string $gateway): void
     {
-        $secret = config('ez-ecommerce.drivers.payment.stripe.webhook_secret');
-        if ($secret === null || $secret === '') {
+        if (in_array($gateway, ['fake', 'null', 'manual'], true)
+            && ! app()->environment('local', 'testing')) {
+            abort(404);
+        }
+    }
+
+    private function verifyInboundAccess(Request $request, string $gateway, string $payload): void
+    {
+        if ($gateway === 'stripe') {
+            $secret = config('ez-ecommerce.drivers.payment.stripe.webhook_secret');
+            if ($secret === null || $secret === '') {
+                abort(403, 'Stripe webhook secret is not configured.');
+            }
+            $this->verifyStripeSignature($request, $payload, $secret);
+
             return;
         }
 
+        if (in_array($gateway, ['fake', 'null', 'manual'], true)) {
+            return;
+        }
+
+        if (config('ez-ecommerce.inbound_webhooks.allow_unsigned', false)) {
+            return;
+        }
+
+        $shared = config('ez-ecommerce.inbound_webhooks.shared_secret');
+        if ($shared === null || $shared === '') {
+            abort(403, 'Inbound webhook shared secret is not configured.');
+        }
+
+        $provided = $request->header('X-Commerce-Webhook-Secret');
+        if (! is_string($provided) || ! hash_equals($shared, $provided)) {
+            abort(401, 'Invalid inbound webhook secret.');
+        }
+    }
+
+    private function verifyStripeSignature(Request $request, string $payload, string $secret): void
+    {
         $signature = $request->header('Stripe-Signature');
         if (! is_string($signature) || $signature === '') {
             abort(400, 'Missing Stripe-Signature header.');
@@ -56,7 +89,7 @@ final class InboundWebhookController extends Controller
 
         try {
             Webhook::constructEvent($payload, $signature, $secret);
-        } catch (\UnexpectedValueException|SignatureVerificationException $e) {
+        } catch (\UnexpectedValueException|SignatureVerificationException) {
             abort(400, 'Invalid Stripe webhook signature.');
         }
     }

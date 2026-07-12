@@ -2,6 +2,8 @@
 
 namespace EzEcommerce\Webhooks\Inbound;
 
+use EzEcommerce\Webhooks\Inbound\Http\Controllers\InboundWebhookController;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class InboundWebhooksServiceProvider extends ServiceProvider
@@ -14,6 +16,15 @@ class InboundWebhooksServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->loadRoutesFrom(dirname(__DIR__, 3).'/routes/webhooks.php');
+        $gateways = app()->environment('local', 'testing')
+            ? 'stripe|paypal|telr|fake|null|manual'
+            : 'stripe|paypal|telr';
+
+        Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
+            ->middleware(config('ez-ecommerce.api.middleware', ['api']))
+            ->group(function () use ($gateways): void {
+                Route::post('webhooks/{gateway}', InboundWebhookController::class)
+                    ->where('gateway', $gateways);
+            });
     }
 }

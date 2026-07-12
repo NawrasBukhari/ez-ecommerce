@@ -59,7 +59,7 @@ final class ReconcilePayment
             return $event;
         }
 
-        $this->applyEvent($payment, $event);
+        $this->applyEvent($request->gateway, $payment, $event);
 
         return $event;
     }
@@ -83,40 +83,72 @@ final class ReconcilePayment
             ->first();
     }
 
-    private function applyEvent(Payment $payment, GatewayWebhookEvent $event): void
+    private function applyEvent(string $gateway, Payment $payment, GatewayWebhookEvent $event): void
     {
-        if (str_contains($event->eventType, 'capture') || str_contains($event->eventType, 'paid')) {
-            $amountMinor = $event->amountMinor ?? ($payment->amount_minor - $payment->captured_minor);
-
-            PaymentTransaction::query()->create([
-                'payment_id' => $payment->id,
-                'type' => PaymentTransactionType::Capture,
-                'amount_minor' => $amountMinor,
-                'currency' => $event->currency ?? $payment->currency,
-                'external_id' => $event->externalId,
-                'status' => 'succeeded',
-                'processed_at' => $this->clock->now(),
-                'metadata' => $event->metadata,
-            ]);
-
-            $capturedMinor = $payment->captured_minor + $amountMinor;
-            $status = $capturedMinor >= $payment->amount_minor
-                ? PaymentStatus::Captured
-                : PaymentStatus::PartiallyCaptured;
-
-            $payment->update([
-                'status' => $status,
-                'captured_minor' => $capturedMinor,
-            ]);
-
-            $order = $payment->order;
-            $this->recalculateOrderPaymentStatus->execute($order);
-            $this->commitReservation->executeForOrder($order);
-
-            if ($status === PaymentStatus::Captured) {
-                Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
-            }
+        if (! $this->isSuccessfulCaptureEvent($gateway, $event->eventType)) {
+            return;
         }
+
+        if (PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('type', PaymentTransactionType::Capture)
+            ->where('external_id', $event->externalId)
+            ->exists()) {
+            return;
+        }
+
+        $amountMinor = $event->amountMinor ?? ($payment->amount_minor - $payment->captured_minor);
+        if ($amountMinor <= 0) {
+            return;
+        }
+
+        PaymentTransaction::query()->create([
+            'payment_id' => $payment->id,
+            'type' => PaymentTransactionType::Capture,
+            'amount_minor' => $amountMinor,
+            'currency' => $event->currency ?? $payment->currency,
+            'external_id' => $event->externalId,
+            'status' => 'succeeded',
+            'processed_at' => $this->clock->now(),
+            'metadata' => $event->metadata,
+        ]);
+
+        $capturedMinor = $payment->captured_minor + $amountMinor;
+        $status = $capturedMinor >= $payment->amount_minor
+            ? PaymentStatus::Captured
+            : PaymentStatus::PartiallyCaptured;
+
+        $payment->update([
+            'status' => $status,
+            'captured_minor' => $capturedMinor,
+        ]);
+
+        $order = $payment->order;
+        $this->recalculateOrderPaymentStatus->execute($order);
+        $this->commitReservation->executeForOrder($order);
+
+        if ($status === PaymentStatus::Captured) {
+            Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+        }
+    }
+
+    private function isSuccessfulCaptureEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'stripe' => in_array($eventType, [
+                'payment_intent.succeeded',
+                'charge.captured',
+                'checkout.session.completed',
+            ], true),
+            'paypal' => in_array($eventType, [
+                'PAYMENT.CAPTURE.COMPLETED',
+                'CHECKOUT.ORDER.APPROVED',
+                'PAYMENT.SALE.COMPLETED',
+            ], true),
+            'telr' => in_array($eventType, ['authorised', 'paid', 'success'], true),
+            'fake' => $eventType === 'payment.captured',
+            default => false,
+        };
     }
 
     private function resolveGateway(string $name): PaymentGateway

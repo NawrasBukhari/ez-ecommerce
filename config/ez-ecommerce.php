@@ -82,6 +82,12 @@ return [
         'prefix' => 'api/ez-commerce/v1',
         'middleware' => ['api'],
         'token' => env('COMMERCE_API_TOKEN'),
+        'allow_unauthenticated' => env('COMMERCE_API_ALLOW_UNAUTHENTICATED', false),
+    ],
+
+    'inbound_webhooks' => [
+        'shared_secret' => env('COMMERCE_INBOUND_WEBHOOK_SECRET'),
+        'allow_unsigned' => env('COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED', false),
     ],
 
     'outbound_webhooks' => [

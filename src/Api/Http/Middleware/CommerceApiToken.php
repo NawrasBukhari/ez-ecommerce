@@ -13,7 +13,11 @@ final class CommerceApiToken
         $token = config('ez-ecommerce.api.token');
 
         if ($token === null || $token === '') {
-            return $next($request);
+            if (config('ez-ecommerce.api.allow_unauthenticated', false)) {
+                return $next($request);
+            }
+
+            abort(503, 'Commerce API token is not configured.');
         }
 
         $provided = $request->bearerToken() ?? $request->header('X-Commerce-Api-Token');

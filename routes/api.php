@@ -10,6 +10,7 @@ use EzEcommerce\Api\Http\Controllers\V1\SubscriptionController;
 use EzEcommerce\Api\Http\Controllers\V1\VendorController;
 use EzEcommerce\Api\Http\Middleware\CommerceApiToken;
 use EzEcommerce\Api\Http\Middleware\GuestCartToken;
+use EzEcommerce\Api\Http\Middleware\ValidateCheckoutCartAccess;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
@@ -31,7 +32,8 @@ Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
             Route::post('cart/{cart}/calculate', [CartController::class, 'calculate']);
         });
 
-        Route::post('checkout', [CheckoutController::class, 'store']);
+        Route::post('checkout', [CheckoutController::class, 'store'])
+            ->middleware(ValidateCheckoutCartAccess::class);
 
         Route::middleware(CommerceApiToken::class)->group(function (): void {
             Route::get('orders/{order}', [OrderController::class, 'show']);
