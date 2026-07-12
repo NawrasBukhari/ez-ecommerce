@@ -7,8 +7,9 @@ uses(TestCase::class)->in(__DIR__);
 
 function placeCheckoutOrder($cart, string $idempotencyKey, ?string $shippingMethod = 'flat', string $paymentMethod = 'manual')
 {
+    $cart = $cart->fresh();
     $cart = EzEcommerce::cart()->calculateTotals($cart, $shippingMethod);
-    $hash = EzEcommerce::cart()->totalsHash($cart, $shippingMethod);
+    $hash = EzEcommerce::cart()->totalsHash($cart->fresh(), $shippingMethod);
 
     return EzEcommerce::checkout()->for($cart)
         ->shippingMethod($shippingMethod)

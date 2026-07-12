@@ -138,11 +138,16 @@ final class PlaceOrder
 
             if ($cart->customer_id !== $customer->id) {
                 $cart->update(['customer_id' => $customer->id]);
+                $cart = $cart->fresh();
             }
             $cart->setRelation('customer', $customer->loadMissing('customerGroup'));
 
-            $versionBefore = $cart->version;
-            $cart = $this->calculateCartTotals->execute($cart, $shippingMethod, $shippingAddress, $versionBefore);
+            $cart = $this->calculateCartTotals->execute(
+                $cart,
+                $shippingMethod,
+                $shippingAddress,
+                null,
+            );
 
             $actualHash = $this->calculateCartTotals->totalsHash($cart, $shippingMethod);
             if ($actualHash !== $expectedTotalsHash) {

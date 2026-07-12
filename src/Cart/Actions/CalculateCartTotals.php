@@ -183,7 +183,6 @@ final class CalculateCartTotals
 
         return hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
-            'version' => $cart->version,
             'currency' => $cart->currency,
             'shipping_method' => $shippingMethod,
             'items' => $cart->items->map(fn ($i) => [

@@ -7,12 +7,6 @@ parameters:
 			path: src/Cart/Actions/AddItemToCart.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/AddItemToCart.php
-
-		-
 			message: '#^Parameter \$customer of class EzEcommerce\\Pricing\\Data\\PricingContext constructor expects EzEcommerce\\Customers\\Models\\Customer\|null, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
 			identifier: argument.type
 			count: 1
@@ -22,12 +16,6 @@ parameters:
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$currency\.$#'
 			identifier: property.notFound
 			count: 1
-			path: src/Cart/Actions/ApplyDiscountCode.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 2
 			path: src/Cart/Actions/ApplyDiscountCode.php
 
 		-
@@ -121,12 +109,6 @@ parameters:
 			path: src/Cart/Actions/CalculateCartTotals.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 5
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$affects_total\.$#'
 			identifier: property.notFound
 			count: 1
@@ -211,12 +193,6 @@ parameters:
 			path: src/Cart/Actions/CalculateCartTotals.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/MergeCarts.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\CartItem\:\:\$quantity\.$#'
 			identifier: property.notFound
 			count: 1
@@ -241,28 +217,10 @@ parameters:
 			path: src/Cart/Actions/MergeCarts.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/RemoveCartItem.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\CartItem\:\:\$cart_id\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Cart/Actions/RemoveCartItem.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/RemoveDiscountCode.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/UpdateCartItem.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\CartItem\:\:\$cart_id\.$#'
@@ -278,12 +236,6 @@ parameters:
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Exceptions/CartVersionConflictException.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Cart/Exceptions/CartVersionConflictException.php
@@ -325,12 +277,6 @@ parameters:
 			path: src/Catalog/Models/ProductVariant.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$customer_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Checkout/Actions/PlaceOrder.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$metadata\.$#'
 			identifier: property.notFound
 			count: 1
@@ -338,12 +284,6 @@ parameters:
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Checkout/Actions/PlaceOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$version\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Checkout/Actions/PlaceOrder.php
@@ -431,12 +371,6 @@ parameters:
 			identifier: function.impossibleType
 			count: 1
 			path: src/Core/Support/CanonicalJson.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$customer_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Customers/DefaultCustomerResolver.php
 
 		-
 			message: '#^Method EzEcommerce\\Customers\\DefaultCustomerResolver\:\:resolve\(\) should return EzEcommerce\\Customers\\Models\\Customer\|null but returns Illuminate\\Database\\Eloquent\\Model\|null\.$#'
