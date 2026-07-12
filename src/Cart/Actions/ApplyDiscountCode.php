@@ -8,6 +8,7 @@ use EzEcommerce\Cart\Models\CartAdjustment;
 use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\AdjustmentOrigin;
 use EzEcommerce\Core\Enums\AdjustmentType;
+use EzEcommerce\Core\Support\MorphMap;
 use EzEcommerce\Discounts\Models\Discount;
 use RuntimeException;
 
@@ -56,7 +57,7 @@ final class ApplyDiscountCode
         CartAdjustment::query()->create([
             'cart_id' => $cart->id,
             'type' => AdjustmentType::Discount,
-            'source_type' => Discount::class,
+            'source_type' => MorphMap::aliasFor(Discount::class),
             'source_id' => $discount->id,
             'code' => $discount->code,
             'label' => $discount->code,

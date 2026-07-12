@@ -8,42 +8,30 @@ use Illuminate\Http\Request;
 
 final class DefaultStoreContext implements StoreContext
 {
-    private ?Store $resolved = null;
-
-    private bool $resolvedFlag = false;
-
     public function __construct(
         private readonly Request $request,
     ) {}
 
     public function current(): ?Store
     {
-        if ($this->resolvedFlag) {
-            return $this->resolved;
-        }
-
-        $this->resolvedFlag = true;
-
         if (! config('ez-ecommerce.features.multi_store', false)) {
-            return $this->resolved = null;
+            return null;
         }
 
         $header = $this->request->header('X-Commerce-Store');
         if (is_string($header) && $header !== '') {
-            $this->resolved = Store::query()
+            return Store::query()
                 ->where('public_id', $header)
                 ->orWhere('slug', $header)
                 ->first();
-
-            return $this->resolved;
         }
 
         $defaultId = config('ez-ecommerce.multi_store.default_store_id');
         if ($defaultId !== null) {
-            $this->resolved = Store::query()->find($defaultId);
+            return Store::query()->find($defaultId);
         }
 
-        return $this->resolved;
+        return null;
     }
 
     public function id(): ?int

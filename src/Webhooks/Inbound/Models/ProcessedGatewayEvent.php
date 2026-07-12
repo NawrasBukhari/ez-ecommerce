@@ -12,8 +12,10 @@ class ProcessedGatewayEvent extends CommerceModel
         'gateway',
         'external_event_id',
         'event_type',
+        'status',
         'payload',
         'processed_at',
+        'last_error',
     ];
 
     protected function casts(): array

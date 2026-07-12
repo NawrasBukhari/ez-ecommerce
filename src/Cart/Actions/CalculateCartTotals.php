@@ -10,9 +10,11 @@ use EzEcommerce\Catalog\Contracts\Taxable;
 use EzEcommerce\Core\Enums\AdjustmentOrigin;
 use EzEcommerce\Core\Enums\AdjustmentType;
 use EzEcommerce\Core\Money\Money;
+use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Pricing\Contracts\PriceResolver;
 use EzEcommerce\Pricing\Data\PricingContext;
+use EzEcommerce\Pricing\Models\PriceList;
 use EzEcommerce\Shipping\Contracts\ShippingCalculator;
 use EzEcommerce\Shipping\Data\ShippingRequest;
 use EzEcommerce\Taxes\Contracts\TaxCalculator;
@@ -40,7 +42,10 @@ final class CalculateCartTotals
                 throw CartVersionConflictException::for($cart);
             }
 
-            $cart->load('items.purchasable', 'adjustments', 'customer');
+            $cart->load('items.purchasable', 'adjustments', 'customer.customerGroup');
+
+            $priceList = $this->resolvePriceList($cart);
+            $customerGroup = $cart->customer?->customerGroup;
 
             $subtotalMinor = 0;
             $shippingLines = [];
@@ -52,6 +57,8 @@ final class CalculateCartTotals
                     currency: $cart->currency,
                     quantity: $item->quantity,
                     customer: $cart->customer,
+                    customerGroup: $customerGroup,
+                    priceList: $priceList,
                 ));
 
                 $lineSubtotal = $quote->unitPrice->multiply($item->quantity);
@@ -164,7 +171,7 @@ final class CalculateCartTotals
     {
         $cart->loadMissing('items', 'adjustments');
 
-        return hash('sha256', json_encode([
+        return hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
             'version' => $cart->version,
             'currency' => $cart->currency,
@@ -186,6 +193,19 @@ final class CalculateCartTotals
                 'subtotal_minor' => $cart->subtotal_minor,
                 'grand_total_minor' => $cart->grand_total_minor,
             ],
-        ], JSON_THROW_ON_ERROR));
+        ]));
+    }
+
+    private function resolvePriceList(Cart $cart): ?PriceList
+    {
+        $metadata = $cart->metadata instanceof \ArrayObject
+            ? $cart->metadata->getArrayCopy()
+            : (array) ($cart->metadata ?? []);
+        $priceListId = $metadata['price_list_id'] ?? null;
+        if (! is_string($priceListId) || $priceListId === '') {
+            return null;
+        }
+
+        return PriceList::query()->where('public_id', $priceListId)->first();
     }
 }

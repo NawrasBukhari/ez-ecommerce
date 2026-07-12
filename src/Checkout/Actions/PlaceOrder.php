@@ -8,18 +8,20 @@ use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Checkout\CheckoutResult;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Core\Enums\CheckoutStatus;
-use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Events\OrderPaid;
 use EzEcommerce\Core\Events\OrderPlaced;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
+use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Customers\Contracts\CustomerResolver;
 use EzEcommerce\Customers\Data\CustomerIdentity;
 use EzEcommerce\Customers\Data\CustomerResolutionContext;
 use EzEcommerce\Customers\Models\Address;
+use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Actions\ReserveInventory;
 use EzEcommerce\Inventory\Contracts\ReservationPolicy;
+use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\CreateOrderFromCart;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Orders\Models\Order;
@@ -43,6 +45,7 @@ final class PlaceOrder
         private readonly CreatePaymentSession $createPaymentSession,
         private readonly CommitReservation $commitReservation,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
+        private readonly ConfirmOrderOnPaymentAccepted $confirmOrderOnPaymentAccepted,
     ) {}
 
     public function execute(
@@ -55,12 +58,35 @@ final class PlaceOrder
         ?string $expectedTotalsHash = null,
         ?CustomerIdentity $customerIdentity = null,
     ): CheckoutResult {
-        $requestHash = hash('sha256', json_encode([
+        if ($idempotencyKey === '') {
+            throw new RuntimeException('Checkout idempotency key is required.');
+        }
+
+        if ($expectedTotalsHash === null || $expectedTotalsHash === '') {
+            throw new RuntimeException('Expected totals hash is required.');
+        }
+
+        $cart = Cart::query()->findOrFail($cart->id);
+        $identity = $customerIdentity ?? new CustomerIdentity;
+        $customer = $this->customerResolver->resolve($identity, new CustomerResolutionContext(cart: $cart));
+        if ($customer === null) {
+            throw new RuntimeException('Customer could not be resolved.');
+        }
+
+        $metadata = $cart->metadata instanceof \ArrayObject
+            ? $cart->metadata->getArrayCopy()
+            : (array) ($cart->metadata ?? []);
+
+        $requestHash = hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
+            'customer_id' => $customer->id,
+            'shipping_address_id' => $shippingAddress?->id,
+            'billing_address_id' => $billingAddress?->id,
+            'price_list_id' => $metadata['price_list_id'] ?? null,
             'shipping_method' => $shippingMethod,
             'payment_method' => $paymentMethod,
             'expected_totals_hash' => $expectedTotalsHash,
-        ], JSON_THROW_ON_ERROR));
+        ]));
 
         ['result' => $cached] = $this->idempotencyStore->execute(
             'checkout',
@@ -68,12 +94,12 @@ final class PlaceOrder
             $requestHash,
             fn () => $this->placeWithinTransaction(
                 $cart,
+                $customer,
                 $shippingAddress,
                 $billingAddress,
                 $shippingMethod,
                 $paymentMethod,
                 $expectedTotalsHash,
-                $customerIdentity,
             ),
         );
 
@@ -87,21 +113,21 @@ final class PlaceOrder
     /** @return array{resource_type: string, resource_id: int, payload: array<string, mixed>} */
     private function placeWithinTransaction(
         Cart $cart,
+        Customer $customer,
         ?Address $shippingAddress,
         ?Address $billingAddress,
         ?string $shippingMethod,
         string $paymentMethod,
-        ?string $expectedTotalsHash,
-        ?CustomerIdentity $customerIdentity,
+        string $expectedTotalsHash,
     ): array {
         $commercial = DB::transaction(function () use (
             $cart,
+            $customer,
             $shippingAddress,
             $billingAddress,
             $shippingMethod,
             $paymentMethod,
             $expectedTotalsHash,
-            $customerIdentity,
         ) {
             $cart = Cart::query()->lockForUpdate()->findOrFail($cart->id);
 
@@ -109,20 +135,17 @@ final class PlaceOrder
                 throw new RuntimeException('Cart is not active.');
             }
 
+            if ($cart->customer_id !== $customer->id) {
+                $cart->update(['customer_id' => $customer->id]);
+            }
+            $cart->setRelation('customer', $customer->loadMissing('customerGroup'));
+
             $versionBefore = $cart->version;
             $cart = $this->calculateCartTotals->execute($cart, $shippingMethod, $shippingAddress, $versionBefore);
 
-            if ($expectedTotalsHash !== null) {
-                $actualHash = $this->calculateCartTotals->totalsHash($cart, $shippingMethod);
-                if ($actualHash !== $expectedTotalsHash) {
-                    throw CartTotalsChangedException::for($cart);
-                }
-            }
-
-            $identity = $customerIdentity ?? new CustomerIdentity;
-            $customer = $this->customerResolver->resolve($identity, new CustomerResolutionContext(cart: $cart));
-            if ($customer === null) {
-                throw new RuntimeException('Customer could not be resolved.');
+            $actualHash = $this->calculateCartTotals->totalsHash($cart, $shippingMethod);
+            if ($actualHash !== $expectedTotalsHash) {
+                throw CartTotalsChangedException::for($cart);
             }
 
             $order = $this->createOrderFromCart->execute(
@@ -176,7 +199,7 @@ final class PlaceOrder
                 $status = CheckoutStatus::RequiresAction;
             } elseif ($sessionResult->status === PaymentStatus::Captured) {
                 $this->commitReservation->executeForOrder($commercial['order']);
-                $commercial['order']->update(['status' => OrderStatus::Confirmed]);
+                $this->confirmOrderOnPaymentAccepted->execute($commercial['order']);
                 Event::dispatch(new OrderPaid($commercial['order']->id, $commercial['order']->public_id, $commercial['payment']->id));
                 $status = CheckoutStatus::Completed;
             } elseif ($this->reservationPolicy->shouldCommitImmediately($commercial['order'], $paymentMethod)) {
@@ -188,19 +211,11 @@ final class PlaceOrder
                 'error_code' => 'session_exception',
                 'error_message' => $e->getMessage(),
             ]);
-            $paymentFailure = new PaymentFailure('session_exception', $e->getMessage(), true);
-            $status = CheckoutStatus::PaymentSessionFailed;
+
+            throw $e;
         }
 
         $this->recalculateOrderPaymentStatus->execute($commercial['order']);
-
-        $result = new CheckoutResult(
-            order: $commercial['order']->fresh(),
-            payment: $commercial['payment']->fresh(),
-            paymentSession: $sessionResult,
-            status: $status,
-            paymentFailure: $paymentFailure,
-        );
 
         return [
             'resource_type' => 'commerce_order',

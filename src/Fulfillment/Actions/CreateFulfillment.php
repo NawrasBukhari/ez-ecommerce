@@ -7,6 +7,7 @@ use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Actions\RecalculateOrderFulfillmentStatus;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Orders\Models\OrderItem;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 final class CreateFulfillment
@@ -22,18 +23,35 @@ final class CreateFulfillment
             throw new RuntimeException('Order is not eligible for fulfillment.');
         }
 
-        if ($quantity <= 0 || $quantity > $item->quantity) {
+        if ($quantity <= 0) {
             throw new RuntimeException('Invalid fulfillment quantity.');
         }
 
-        $fulfillment = Fulfillment::query()->create([
-            'order_id' => $order->id,
-            'order_item_id' => $item->id,
-            'quantity' => $quantity,
-        ]);
+        return DB::transaction(function () use ($order, $item, $quantity) {
+            $lockedItem = OrderItem::query()
+                ->where('id', $item->id)
+                ->where('order_id', $order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $this->recalculateOrderFulfillmentStatus->execute($order);
+            $alreadyFulfilled = (int) Fulfillment::query()
+                ->where('order_item_id', $lockedItem->id)
+                ->sum('quantity');
 
-        return $fulfillment;
+            $remaining = $lockedItem->quantity - $alreadyFulfilled;
+            if ($quantity > $remaining) {
+                throw new RuntimeException("Cannot fulfill {$quantity}; only {$remaining} remaining.");
+            }
+
+            $fulfillment = Fulfillment::query()->create([
+                'order_id' => $order->id,
+                'order_item_id' => $lockedItem->id,
+                'quantity' => $quantity,
+            ]);
+
+            $this->recalculateOrderFulfillmentStatus->execute($order);
+
+            return $fulfillment;
+        });
     }
 }

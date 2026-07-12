@@ -21,7 +21,7 @@ final class IdempotencyStore
      */
     public function execute(string $scope, string $key, string $requestHash, callable $operation): array
     {
-        return DB::transaction(function () use ($scope, $key, $requestHash, $operation) {
+        $early = DB::transaction(function () use ($scope, $key, $requestHash): ?array {
             $record = IdempotencyRecord::query()
                 ->where('scope', $scope)
                 ->where('key', $key)
@@ -39,34 +39,48 @@ final class IdempotencyStore
                     'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
                     'expires_at' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.ttl_minutes', 1440).' minutes'),
                 ]);
-            } else {
-                if ($record->request_hash !== $requestHash) {
-                    throw IdempotencyPayloadMismatchException::for($scope, $key);
-                }
 
-                if ($record->status === IdempotencyStatus::Completed) {
-                    return ['record' => $record, 'result' => $record->response_payload];
-                }
-
-                if ($record->status === IdempotencyStatus::FailedTerminal) {
-                    return ['record' => $record, 'result' => $record->response_payload];
-                }
-
-                if ($record->status === IdempotencyStatus::Processing && $record->locked_until > $this->clock->now()) {
-                    throw IdempotencyConflictException::for($scope, $key);
-                }
-
-                $record->update([
-                    'status' => IdempotencyStatus::Processing,
-                    'attempts' => $record->attempts + 1,
-                    'locked_at' => $this->clock->now(),
-                    'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
-                ]);
+                return ['record' => $record, 'result' => null, 'run' => true];
             }
 
-            try {
-                $result = $operation();
-                $record->update([
+            if ($record->request_hash !== $requestHash) {
+                throw IdempotencyPayloadMismatchException::for($scope, $key);
+            }
+
+            if ($record->status === IdempotencyStatus::Completed) {
+                return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
+            }
+
+            if ($record->status === IdempotencyStatus::FailedTerminal) {
+                return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
+            }
+
+            if ($record->status === IdempotencyStatus::Processing && $record->locked_until > $this->clock->now()) {
+                throw IdempotencyConflictException::for($scope, $key);
+            }
+
+            $record->update([
+                'status' => IdempotencyStatus::Processing,
+                'attempts' => $record->attempts + 1,
+                'locked_at' => $this->clock->now(),
+                'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
+            ]);
+
+            return ['record' => $record->fresh(), 'result' => null, 'run' => true];
+        });
+
+        if (! $early['run']) {
+            return ['record' => $early['record'], 'result' => $early['result']];
+        }
+
+        $record = $early['record'];
+
+        try {
+            $result = $operation();
+
+            $record = DB::transaction(function () use ($record, $result) {
+                $locked = IdempotencyRecord::query()->lockForUpdate()->findOrFail($record->id);
+                $locked->update([
                     'status' => IdempotencyStatus::Completed,
                     'resource_type' => $result['resource_type'],
                     'resource_id' => $result['resource_id'],
@@ -75,16 +89,21 @@ final class IdempotencyStore
                     'locked_until' => null,
                 ]);
 
-                return ['record' => $record->fresh(), 'result' => $result['payload']];
-            } catch (\Throwable $e) {
-                $record->update([
+                return $locked->fresh();
+            });
+
+            return ['record' => $record, 'result' => $result['payload']];
+        } catch (\Throwable $e) {
+            DB::transaction(function () use ($record, $e): void {
+                $locked = IdempotencyRecord::query()->lockForUpdate()->findOrFail($record->id);
+                $locked->update([
                     'status' => IdempotencyStatus::FailedRetryable,
                     'last_error' => $e->getMessage(),
                     'locked_until' => null,
                 ]);
+            });
 
-                throw $e;
-            }
-        });
+            throw $e;
+        }
     }
 }

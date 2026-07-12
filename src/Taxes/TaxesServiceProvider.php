@@ -11,6 +11,7 @@ class TaxesServiceProvider extends ServiceProvider
     {
         $this->app->bind(TaxCalculator::class, function ($app): TaxCalculator {
             return match (config('ez-ecommerce.drivers.tax.default', 'simple')) {
+                'jurisdiction' => $app->make(JurisdictionTaxCalculator::class),
                 default => $app->make(SimpleTaxCalculator::class),
             };
         });

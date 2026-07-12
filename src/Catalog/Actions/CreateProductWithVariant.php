@@ -2,6 +2,7 @@
 
 namespace EzEcommerce\Catalog\Actions;
 
+use EzEcommerce\Catalog\Models\Category;
 use EzEcommerce\Catalog\Models\Product;
 use EzEcommerce\Catalog\Models\ProductVariant;
 use EzEcommerce\CommerceManager;
@@ -55,6 +56,23 @@ final class CreateProductWithVariant
             'type' => 'base',
         ]);
 
+        if (! empty($data['variant']['sale_price_minor'])) {
+            Price::query()->create([
+                'priceable_type' => ProductVariant::MORPH_ALIAS,
+                'priceable_id' => $variant->id,
+                'amount_minor' => $data['variant']['sale_price_minor'],
+                'currency' => $currency,
+                'type' => 'sale',
+            ]);
+        }
+
+        if (! empty($data['category_ids'])) {
+            $categoryIds = Category::query()
+                ->whereIn('public_id', $data['category_ids'])
+                ->pluck('id');
+            $product->categories()->sync($categoryIds);
+        }
+
         $stock = (int) ($data['stock'] ?? 0);
         if ($stock > 0) {
             $warehouse = $this->resolveWarehouse();
@@ -66,7 +84,7 @@ final class CreateProductWithVariant
             );
         }
 
-        return $product->fresh(['variants']);
+        return $product->fresh(['variants', 'categories']);
     }
 
     private function resolveWarehouse(): Warehouse

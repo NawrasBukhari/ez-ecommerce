@@ -19,6 +19,7 @@ final class VendorPayoutResource extends JsonResource
             'currency' => $this->currency,
             'commission_count' => $this->commission_count,
             'paid_at' => $this->paid_at?->toIso8601String(),
+            'commissions' => VendorCommissionResource::collection($this->whenLoaded('commissions')),
         ];
     }
 }

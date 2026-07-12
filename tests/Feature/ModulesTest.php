@@ -83,10 +83,7 @@ it('processes return and restocks item', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'return-flow-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'return-flow-'.uniqid());
 
     $item = $result->order->items->first();
     $balance = InventoryBalance::query()

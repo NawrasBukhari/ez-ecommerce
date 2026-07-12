@@ -11,6 +11,8 @@ use EzEcommerce\Catalog\CatalogServiceProvider;
 use EzEcommerce\Checkout\CheckoutManager;
 use EzEcommerce\Checkout\CheckoutServiceProvider;
 use EzEcommerce\Commands\CommerceInstallCommand;
+use EzEcommerce\Commands\PurgeExpiredCartsCommand;
+use EzEcommerce\Commands\PurgeIdempotencyRecordsCommand;
 use EzEcommerce\Commands\ReleaseExpiredReservationsCommand;
 use EzEcommerce\Commands\RenewSubscriptionsCommand;
 use EzEcommerce\Core\CoreServiceProvider;
@@ -89,10 +91,16 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
                 'add_vendor_id_to_commerce_products_table',
                 'create_commerce_vendor_commissions_table',
                 'create_commerce_outbox_messages_table',
+                'add_customer_group_id_to_commerce_customers_table',
+                'add_metadata_to_commerce_carts_table',
+                'add_order_customer_snapshots_and_addresses_table',
+                'add_status_to_commerce_processed_gateway_events_table',
             ])
             ->hasCommand(CommerceInstallCommand::class)
             ->hasCommand(ReleaseExpiredReservationsCommand::class)
-            ->hasCommand(RenewSubscriptionsCommand::class);
+            ->hasCommand(RenewSubscriptionsCommand::class)
+            ->hasCommand(PurgeExpiredCartsCommand::class)
+            ->hasCommand(PurgeIdempotencyRecordsCommand::class);
     }
 
     public function packageRegistered(): void
@@ -121,7 +129,7 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
      */
     private function moduleProviders(): array
     {
-        return [
+        $providers = [
             CoreServiceProvider::class,
             CatalogServiceProvider::class,
             PricingServiceProvider::class,
@@ -138,11 +146,25 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
             RefundsServiceProvider::class,
             ReturnsServiceProvider::class,
             InboundWebhooksServiceProvider::class,
-            OutboundWebhooksServiceProvider::class,
             StoresServiceProvider::class,
-            B2BServiceProvider::class,
-            SubscriptionsServiceProvider::class,
-            MarketplaceServiceProvider::class,
         ];
+
+        if (config('ez-ecommerce.features.b2b', false)) {
+            $providers[] = B2BServiceProvider::class;
+        }
+
+        if (config('ez-ecommerce.features.subscriptions', false)) {
+            $providers[] = SubscriptionsServiceProvider::class;
+        }
+
+        if (config('ez-ecommerce.features.marketplace', false)) {
+            $providers[] = MarketplaceServiceProvider::class;
+        }
+
+        if (config('ez-ecommerce.features.outbound_webhooks', false)) {
+            $providers[] = OutboundWebhooksServiceProvider::class;
+        }
+
+        return $providers;
     }
 }

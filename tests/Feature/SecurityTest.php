@@ -97,9 +97,8 @@ it('verifies paypal webhook with native signature when webhook id is set', funct
     ]);
 
     $payload = json_encode([
-        'event_type' => 'PAYMENT.CAPTURE.COMPLETED',
+        'event_type' => 'unknown.event',
         'id' => 'evt_paypal_native',
-        'resource' => ['id' => 'CAP-1'],
     ]);
 
     $this->withHeaders([

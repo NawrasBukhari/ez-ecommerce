@@ -24,6 +24,9 @@ class Order extends CommerceModel
     protected $fillable = [
         'store_id',
         'customer_id',
+        'customer_email',
+        'customer_name',
+        'customer_phone',
         'cart_id',
         'status',
         'payment_status',
@@ -74,6 +77,11 @@ class Order extends CommerceModel
     public function transitions(): HasMany
     {
         return $this->hasMany(OrderTransition::class);
+    }
+
+    public function addresses(): HasMany
+    {
+        return $this->hasMany(OrderAddress::class);
     }
 
     public function payments(): HasMany

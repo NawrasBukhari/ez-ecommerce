@@ -177,6 +177,8 @@ Enabled when `features.api` is `true` (default). See [REST API](#rest-api) for t
 php artisan commerce:install
 php artisan commerce:release-expired-reservations
 php artisan commerce:renew-subscriptions
+php artisan commerce:purge-expired-carts
+php artisan commerce:purge-idempotency-records
 ```
 
 ---
@@ -323,7 +325,11 @@ EzEcommerce::checkout()->for($cart)
 
 | Method | Path | Body / headers |
 |--------|------|----------------|
-| `GET` | `/products` | — |
+| `GET` | `/categories` | — |
+| `GET` | `/categories/{id}` | — |
+| `GET` | `/categories/{id}/products` | Paginated |
+| `GET` | `/shipping-methods` | Available shipping methods |
+| `GET` | `/products` | `?category=`, `?vendor=`; optional `X-Commerce-Store` |
 | `GET` | `/products/{id\|slug}` | — |
 | `GET` | `/products/{id}/variants` | — |
 | `POST` | `/cart/guest` | `{ "currency": "AED" }` → returns `guest_token` |
@@ -333,8 +339,8 @@ EzEcommerce::checkout()->for($cart)
 | `DELETE` | `/cart/{id}/items/{itemId}` | — |
 | `POST` | `/cart/{id}/discount` | `{ "code" }` |
 | `DELETE` | `/cart/{id}/discount` | `{ "code"? }` |
-| `POST` | `/cart/{id}/calculate` | `{ "shipping_method" }` |
-| `POST` | `/checkout` | `{ "cart_id", "shipping_method", "payment_method" }` + headers |
+| `POST` | `/cart/{id}/calculate` | `{ "shipping_method", "price_list_id"? }` → returns `totals_hash` |
+| `POST` | `/checkout` | `{ "cart_id", "shipping_method", "payment_method", "expected_totals_hash" }` + `X-Guest-Cart-Token` + `Idempotency-Key` |
 
 ### Protected routes (bearer token + scope)
 
@@ -346,7 +352,27 @@ Scopes: `catalog`, `inventory`, `orders`, `returns`, `customers`, `stores`, `com
 | `POST` | `/customers/{id}/cart` | `customers.write` | Create or return active customer cart |
 | `POST` | `/products` | `catalog.write` | Product + variant + price + optional stock |
 | `GET/POST` | `/warehouses` | `inventory.read` / `inventory.write` | List / create warehouses |
+| `GET` | `/warehouses/{id}` | `inventory.read` | Show warehouse |
+| `GET` | `/warehouses/{id}/movements` | `inventory.read` | Stock movement audit |
 | `POST` | `/warehouses/{id}/receive` | `inventory.write` | Receive stock |
+| `POST` | `/warehouses/{id}/adjust` | `inventory.write` | Signed stock adjustment |
+| `POST` | `/warehouses/{id}/transfer` | `inventory.write` | Transfer between warehouses |
+| `POST` | `/warehouses/{id}/deactivate` | `inventory.write` | Deactivate warehouse |
+| `POST` | `/reservations/{id}/release` | `inventory.write` | Release hold (numeric reservation id) |
+| `GET/POST` | `/customer-groups` | `customers.read` / `customers.write` | Pricing groups |
+| `GET` | `/orders/{id}/transitions` | `orders.read` | Status audit trail |
+| `GET` | `/orders/{id}/fulfillments` | `orders.read` | Fulfillment history |
+| `GET` | `/orders/{id}/refunds` | `orders.read` | Refund history |
+| `GET` | `/orders/{id}/payments` | `orders.read` | Payment summary |
+| `GET` | `/orders/{id}/payments/{paymentId}/transactions` | `orders.read` | Ledger transactions |
+| `POST` | `/orders/{id}/cancel` | `orders.write` | Cancel unpaid order |
+| `POST` | `/orders/{id}/complete` | `orders.write` | Mark order completed |
+| `GET` | `/vendors/{id}/commissions` | `marketplace.read` | Commission list |
+| `GET` | `/vendors/{id}/payouts` | `marketplace.read` | Payout history |
+| `GET` | `/vendors/{id}/payouts/{payoutId}` | `marketplace.read` | Single payout + commissions |
+| `GET/POST` | `/subscription-plans` | `subscriptions.read` / `subscriptions.write` | Plan admin |
+| `GET` | `/inbound-webhooks/events` | `orders.read` | Processed gateway event log |
+| `POST` | `/webhook-deliveries/{id}/retry` | `orders.write` | Retry failed outbound delivery (numeric id) |
 | `POST` | `/vendors/{id}/payouts` | `marketplace.write` | Pay pending commissions |
 | `GET` | `/orders/{id}` | `orders.read` | — |
 | `POST` | `/orders/{id}/capture` | `orders.write` | Manual gateway capture |
@@ -374,7 +400,13 @@ Scopes: `catalog`, `inventory`, `orders`, `returns`, `customers`, `stores`, `com
 | `POST` | `/webhooks/telr` | `X-Commerce-Webhook-Secret` |
 | `POST` | `/webhooks/fake` | Local/testing only |
 
-**Multi-store:** send `X-Commerce-Store` with store `public_id` or `slug`.
+**Multi-store:** send `X-Commerce-Store` with store `public_id` or `slug` (enable `ez-ecommerce.features.multi_store`).
+
+**Route IDs:** most resources use `public_id` (ULID) in URLs. Exceptions: cart line `itemId`, reservation id, webhook delivery id (numeric internal ids).
+
+**Feature flags:** `subscriptions`, `marketplace`, `multi_store`, `b2b`, and `outbound_webhooks` default to `false`. Enable in config before using those modules.
+
+**Production note:** run the `@group('hardening')` suite on MySQL in CI before treating checkout/payments as production-ready.
 
 **Cart JSON shape:** cart `id` is the `public_id` (ULID), not the database integer.
 
@@ -458,6 +490,8 @@ use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('commerce:release-expired-reservations')->everyFiveMinutes();
 Schedule::command('commerce:renew-subscriptions')->hourly();
+Schedule::command('commerce:purge-expired-carts')->daily();
+Schedule::command('commerce:purge-idempotency-records')->daily();
 ```
 
 ---
@@ -518,7 +552,7 @@ vendor/bin/phpstan analyse
 
 ## Test coverage honesty
 
-**52 tests. 9 files.** Core commerce, API, security, webhooks, subscriptions, marketplace, returns, sprint + backlog endpoints.
+**81 tests. 11 files.** Core commerce, API, security, schema/relations, backlog implementation.
 
 | Test file | Coverage |
 |-----------|----------|
@@ -529,6 +563,8 @@ vendor/bin/phpstan analyse
 | `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions |
 | `SprintApiTest` | Customers, addresses, cart merge, retry payment, returns API |
 | `BacklogApiTest` | Customer cart, catalog write, inventory admin, payouts, scoped tokens |
+| `BacklogImplementationTest` | Order cancel, marketplace reads, plans, groups, categories, cart expiry, webhooks |
+| `SchemaAndRelationsTest` | Migrations, FK integrity, model relations |
 | `ModulesTest` | Discounts, pricing, subscriptions, returns, money allocate |
 | `ModulesExtendedTest` | Outbox webhooks, inbound webhooks, fake gateway, renew+bill, marketplace commission, reservations |
 

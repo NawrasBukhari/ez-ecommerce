@@ -42,9 +42,37 @@ All notable changes to `ez-ecommerce/ez-ecommerce` are documented in this file.
 - `commerce_vendor_payouts` table + `PayVendorCommissions` action.
 - Scoped API tokens (`catalog`, `inventory`, `orders`, `customers`, `marketplace`, etc.).
 
+### Added (backlog implementation)
+
+- Order cancel/complete API + order transitions, fulfillments, refunds, payments read endpoints.
+- Marketplace commission + payout history read APIs.
+- Subscription plans API, customer groups API, public categories + product filters.
+- Inventory transfer/adjust/deactivate, movements read, reservation release.
+- Cart expiry enforcement + purge command; `price_list_id` on cart calculate/checkout.
+- `GET /shipping-methods`, weight shipping calculator, jurisdiction tax driver.
+- Webhook delivery retry, outbound events (`return.received`, `refund.created`, `subscription.renewed`), inbound event log API.
+- Migrations: `customer_group_id` on customers, `metadata` on carts.
+- 81 Pest tests across 11 feature files.
+
+### Changed (correctness consolidation)
+
+- `IdempotencyStore` uses short DB transactions only; gateway calls run outside any open transaction.
+- Tax after discount subtracts from taxable base (was incorrectly added).
+- Checkout resolves customer before final cart recalculation; order lines reuse cart item prices.
+- Order customer/address snapshots (`commerce_order_addresses`, customer email/name/phone on order).
+- `CapturePayment` / `RefundPayment` lock payments and validate remaining balances; ledger-driven aggregates.
+- `ConfirmOrderOnPaymentAccepted` on manual capture and webhook reconcile.
+- Fulfillment validates remaining quantity per line with row lock.
+- Webhook reconcile uses inbox `status` on processed events; skips capture when payment not found.
+- `PaymentGatewayRegistry` replaces duplicated gateway resolution.
+- Advanced feature flags (`subscriptions`, `marketplace`, `b2b`, `outbound_webhooks`) default to `false`.
+- `POST /checkout` requires `expected_totals_hash`; cart calculate returns `totals_hash`.
+- 89 Pest tests; MySQL hardening job uses real MySQL connection.
+
 ### Changed
 
-- All `features.*` flags default to `true` for day-one readiness.
+- `DefaultStoreContext` resolves store per request (no stale cache).
+- `DeliverWebhookJob` retries with backoff (3 attempts).
 - Package migrations load automatically; host app runs `php artisan migrate`.
 - Telr driver implements refund HTTP call (capture remains optimistic).
 - Address model uses `country_code` column (API accepts `country`).

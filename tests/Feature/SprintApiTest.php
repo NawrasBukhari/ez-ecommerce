@@ -79,10 +79,7 @@ it('retries payment session via api', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'retry-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'retry-'.uniqid());
 
     $response = $this->withHeaders($this->commerceApiHeaders())
         ->postJson("/api/ez-commerce/v1/orders/{$result->order->public_id}/retry-payment")
@@ -99,10 +96,7 @@ it('creates and receives return via api', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'return-api-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'return-api-'.uniqid());
 
     $orderItemId = $result->order->items->first()->id;
 

@@ -45,10 +45,19 @@ return [
 
     'tax' => [
         'rate' => (float) env('COMMERCE_TAX_RATE', 0.05),
+        'jurisdictions' => [
+            'AE' => 0.05,
+            'US' => 0.08,
+        ],
     ],
 
     'shipping' => [
         'flat_rate_minor' => (int) env('COMMERCE_SHIPPING_FLAT_MINOR', 0),
+        'methods' => ['flat', 'weight'],
+        'weight' => [
+            'base_minor' => (int) env('COMMERCE_SHIPPING_WEIGHT_BASE_MINOR', 1000),
+            'per_kg_minor' => (int) env('COMMERCE_SHIPPING_WEIGHT_PER_KG_MINOR', 500),
+        ],
     ],
 
     'inventory' => [
@@ -72,11 +81,11 @@ return [
 
     'features' => [
         'api' => true,
-        'subscriptions' => true,
-        'marketplace' => true,
-        'multi_store' => true,
-        'b2b' => true,
-        'outbound_webhooks' => true,
+        'subscriptions' => false,
+        'marketplace' => false,
+        'multi_store' => false,
+        'b2b' => false,
+        'outbound_webhooks' => false,
     ],
 
     'api' => [

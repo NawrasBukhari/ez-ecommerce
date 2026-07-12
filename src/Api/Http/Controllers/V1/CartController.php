@@ -4,6 +4,7 @@ namespace EzEcommerce\Api\Http\Controllers\V1;
 
 use EzEcommerce\Api\Http\Resources\CartItemResource;
 use EzEcommerce\Api\Http\Resources\CartResource;
+use EzEcommerce\Cart\Actions\CalculateCartTotals;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
 use EzEcommerce\Catalog\Models\ProductVariant;
@@ -136,8 +137,17 @@ final class CartController extends Controller
     {
         $validated = $request->validate([
             'shipping_method' => ['sometimes', 'nullable', 'string'],
+            'price_list_id' => ['sometimes', 'nullable', 'string'],
             'expected_version' => ['sometimes', 'integer'],
         ]);
+
+        if (! empty($validated['price_list_id'])) {
+            $metadata = $cart->metadata instanceof \ArrayObject
+                ? $cart->metadata->getArrayCopy()
+                : (array) ($cart->metadata ?? []);
+            $metadata['price_list_id'] = $validated['price_list_id'];
+            $cart->update(['metadata' => $metadata]);
+        }
 
         $cart = $this->commerce->cart()->calculateTotals(
             $cart,
@@ -148,7 +158,10 @@ final class CartController extends Controller
 
         $cart->load('items.purchasable');
 
-        return new CartResource($cart);
+        $totalsHash = app(CalculateCartTotals::class)
+            ->totalsHash($cart, $validated['shipping_method'] ?? null);
+
+        return (new CartResource($cart))->additional(['totals_hash' => $totalsHash]);
     }
 
     public function merge(Request $request): CartResource

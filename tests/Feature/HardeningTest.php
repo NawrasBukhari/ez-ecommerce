@@ -22,10 +22,7 @@ it('captures manual payment, fulfills, and partially refunds', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 2);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'full-flow-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'full-flow-'.uniqid());
 
     $payment = $result->payment;
     $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
@@ -80,11 +77,9 @@ it('rejects checkout when inventory is insufficient', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 5);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'insufficient-'.uniqid());
-})->throws(RuntimeException::class)->group('hardening');
+    expect(fn () => placeCheckoutOrder($cart, 'insufficient-'.uniqid()))
+        ->toThrow(RuntimeException::class);
+})->group('hardening');
 
 it('null gateway rejects non-zero totals', function () {
     $payment = Payment::query()->make([

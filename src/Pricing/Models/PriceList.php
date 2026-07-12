@@ -15,6 +15,7 @@ class PriceList extends CommerceModel
     protected $fillable = [
         'name',
         'currency',
+        'code',
         'metadata',
     ];
 

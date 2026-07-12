@@ -20,7 +20,7 @@ final class CheckoutController extends Controller
             'cart_id' => ['required', 'string'],
             'shipping_method' => ['sometimes', 'nullable', 'string'],
             'payment_method' => ['sometimes', 'nullable', 'string'],
-            'expected_totals_hash' => ['sometimes', 'nullable', 'string'],
+            'expected_totals_hash' => ['required', 'string'],
         ]);
 
         $cart = Cart::query()
@@ -38,7 +38,7 @@ final class CheckoutController extends Controller
             ->paymentMethod($validated['payment_method'] ?? null)
             ->place(
                 idempotencyKey: $idempotencyKey,
-                expectedTotalsHash: $validated['expected_totals_hash'] ?? null,
+                expectedTotalsHash: $validated['expected_totals_hash'],
             );
 
         return new CheckoutResultResource($result);

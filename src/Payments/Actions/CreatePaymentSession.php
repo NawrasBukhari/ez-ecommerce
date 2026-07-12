@@ -7,29 +7,23 @@ use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Models\Order;
-use EzEcommerce\Payments\Contracts\PaymentGateway;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
-use EzEcommerce\Payments\Drivers\FakePaymentGateway;
-use EzEcommerce\Payments\Drivers\ManualPaymentGateway;
-use EzEcommerce\Payments\Drivers\NullPaymentGateway;
-use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
-use EzEcommerce\Payments\Drivers\StripePaymentGateway;
-use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
-use InvalidArgumentException;
+use EzEcommerce\Payments\PaymentGatewayRegistry;
 
 final class CreatePaymentSession
 {
     public function __construct(
         private readonly Clock $clock,
+        private readonly PaymentGatewayRegistry $gateways,
     ) {}
 
     public function execute(Payment $payment, PaymentAttempt $attempt, Order $order): PaymentSessionResult
     {
-        $gateway = $this->resolveGateway($payment->gateway);
+        $gateway = $this->gateways->for($payment->gateway);
 
         $data = new CreatePaymentSessionData(
             payment: $payment,
@@ -73,19 +67,5 @@ final class CreatePaymentSession
         }
 
         return $result;
-    }
-
-    private function resolveGateway(string $name): PaymentGateway
-    {
-        return match ($name) {
-            'null' => app(NullPaymentGateway::class),
-            'manual' => app(ManualPaymentGateway::class),
-            'fake' => app(FakePaymentGateway::class),
-            'stripe' => app(StripePaymentGateway::class),
-            'paypal' => app(PayPalPaymentGateway::class),
-            'telr' => app(TelrPaymentGateway::class),
-            'net_terms' => app(ManualPaymentGateway::class),
-            default => throw new InvalidArgumentException("Unknown payment gateway [{$name}]."),
-        };
     }
 }

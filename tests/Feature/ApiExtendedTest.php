@@ -22,7 +22,7 @@ function checkoutViaApi($test, $variant, string $idempotencyKey = 'api-checkout'
             'quantity' => 1,
         ])->assertCreated();
 
-    $test->withHeaders(['X-Guest-Cart-Token' => $token])
+    $calculate = $test->withHeaders(['X-Guest-Cart-Token' => $token])
         ->postJson("/api/ez-commerce/v1/cart/{$cartId}/calculate", ['shipping_method' => 'flat'])
         ->assertOk();
 
@@ -33,6 +33,7 @@ function checkoutViaApi($test, $variant, string $idempotencyKey = 'api-checkout'
         'cart_id' => $cartId,
         'shipping_method' => 'flat',
         'payment_method' => 'manual',
+        'expected_totals_hash' => $calculate->json('totals_hash'),
     ]);
 
     return compact('guest', 'token', 'cartId', 'checkout');

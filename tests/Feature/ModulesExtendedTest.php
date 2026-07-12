@@ -48,10 +48,7 @@ it('reconciles fake gateway webhook', function () {
     ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'webhook-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'webhook-'.uniqid());
 
     $attempt = $result->payment->attempts()->first();
     $attempt?->update(['external_id' => 'manual_attempt']);
@@ -136,10 +133,7 @@ it('records marketplace commission on order', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'commission-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'commission-'.uniqid());
 
     expect(VendorCommission::query()
         ->where('order_id', $result->order->id)
@@ -160,10 +154,7 @@ it('uses fake payment gateway for requires action session', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->paymentMethod('fake')
-        ->shippingMethod('flat')
-        ->place(idempotencyKey: 'fake-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'fake-'.uniqid(), 'flat', 'fake');
 
     expect($result->status)->toBe(CheckoutStatus::RequiresAction);
     expect($result->requiresCustomerAction())->toBeTrue();

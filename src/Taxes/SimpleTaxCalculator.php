@@ -15,7 +15,10 @@ final class SimpleTaxCalculator implements TaxCalculator
         $taxableBase = $request->subtotal;
 
         if (config('ez-ecommerce.pricing.tax_after_discounts', true)) {
-            $taxableBase = $taxableBase->plus($request->discountTotal);
+            $afterDiscount = $taxableBase->minus($request->discountTotal);
+            $taxableBase = $afterDiscount->minorAmount < 0
+                ? Money::zero($taxableBase->currency)
+                : $afterDiscount;
         }
 
         if (config('ez-ecommerce.pricing.shipping_taxable', true) && ! $request->shippingTotal->isZero()) {

@@ -14,6 +14,7 @@ class CustomerGroup extends CommerceModel
 
     protected $fillable = [
         'name',
+        'code',
         'metadata',
     ];
 

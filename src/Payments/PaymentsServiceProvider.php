@@ -21,23 +21,12 @@ class PaymentsServiceProvider extends ServiceProvider
         $this->app->singleton(StripePaymentGateway::class);
         $this->app->singleton(PayPalPaymentGateway::class);
         $this->app->singleton(TelrPaymentGateway::class);
+        $this->app->singleton(PaymentGatewayRegistry::class);
 
         $this->app->singleton(PaymentGateway::class, function ($app): PaymentGateway {
             $driver = config('ez-ecommerce.drivers.payment.default', 'manual');
 
-            return $this->resolve($app, $driver);
+            return $app->make(PaymentGatewayRegistry::class)->for($driver);
         });
-    }
-
-    public function resolve(mixed $app, string $driver): PaymentGateway
-    {
-        return match ($driver) {
-            'null' => $app->make(NullPaymentGateway::class),
-            'fake' => $app->make(FakePaymentGateway::class),
-            'stripe' => $app->make(StripePaymentGateway::class),
-            'paypal' => $app->make(PayPalPaymentGateway::class),
-            'telr' => $app->make(TelrPaymentGateway::class),
-            default => $app->make(ManualPaymentGateway::class),
-        };
     }
 }

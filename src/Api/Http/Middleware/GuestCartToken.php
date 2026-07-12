@@ -3,16 +3,21 @@
 namespace EzEcommerce\Api\Http\Middleware;
 
 use Closure;
+use EzEcommerce\Api\Http\Middleware\Concerns\ValidatesCartExpiry;
 use EzEcommerce\Cart\Models\Cart;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class GuestCartToken
 {
+    use ValidatesCartExpiry;
+
     public function handle(Request $request, Closure $next): Response
     {
         /** @var Cart $cart */
         $cart = $request->route('cart');
+
+        $this->rejectIfCartExpired($cart);
 
         if ($this->guestTokenMatches($request, $cart)) {
             return $next($request);

@@ -3,12 +3,15 @@
 namespace EzEcommerce\Api\Http\Middleware;
 
 use Closure;
+use EzEcommerce\Api\Http\Middleware\Concerns\ValidatesCartExpiry;
 use EzEcommerce\Cart\Models\Cart;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class ValidateCheckoutCartAccess
 {
+    use ValidatesCartExpiry;
+
     public function handle(Request $request, Closure $next): Response
     {
         $cartId = $request->input('cart_id');
@@ -17,6 +20,16 @@ final class ValidateCheckoutCartAccess
         }
 
         $cart = Cart::query()->where('public_id', $cartId)->firstOrFail();
+
+        $this->rejectIfCartExpired($cart);
+
+        if ($request->filled('price_list_id')) {
+            $metadata = $cart->metadata instanceof \ArrayObject
+                ? $cart->metadata->getArrayCopy()
+                : (array) ($cart->metadata ?? []);
+            $metadata['price_list_id'] = $request->string('price_list_id');
+            $cart->update(['metadata' => $metadata]);
+        }
 
         if ($this->guestTokenMatches($request, $cart)) {
             return $next($request);

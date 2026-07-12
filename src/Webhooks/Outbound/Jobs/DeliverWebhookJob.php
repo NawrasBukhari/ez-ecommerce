@@ -19,6 +19,11 @@ final class DeliverWebhookJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
+    public int $tries = 3;
+
+    /** @var list<int> */
+    public array $backoff = [10, 60, 300];
+
     /** @param  array<string, mixed>  $payload */
     public function __construct(
         public string $url,

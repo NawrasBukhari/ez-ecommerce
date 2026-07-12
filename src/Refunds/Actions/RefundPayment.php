@@ -6,26 +6,25 @@ use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Enums\RefundStatus;
+use EzEcommerce\Core\Events\Concerns\DispatchesCommerceWebhooks;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
-use EzEcommerce\Payments\Contracts\PaymentGateway;
 use EzEcommerce\Payments\Data\RefundPaymentData;
-use EzEcommerce\Payments\Drivers\FakePaymentGateway;
-use EzEcommerce\Payments\Drivers\ManualPaymentGateway;
-use EzEcommerce\Payments\Drivers\NullPaymentGateway;
-use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
-use EzEcommerce\Payments\Drivers\StripePaymentGateway;
-use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
+use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Models\Refund;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 final class RefundPayment
 {
+    use DispatchesCommerceWebhooks;
+
     public function __construct(
         private readonly Clock $clock,
+        private readonly PaymentGatewayRegistry $gateways,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
     ) {}
 
@@ -35,28 +34,83 @@ final class RefundPayment
         ?string $reason = null,
         string $idempotencyKey = '',
     ): Refund {
-        $refund = Refund::query()->create([
-            'payment_id' => $payment->id,
-            'order_id' => $payment->order_id,
-            'amount_minor' => $amount->minorAmount,
-            'currency' => $amount->currency,
-            'status' => RefundStatus::Pending,
-            'reason' => $reason,
-        ]);
+        if ($amount->minorAmount <= 0) {
+            throw new InvalidArgumentException('Refund amount must be positive.');
+        }
 
-        $attempt = PaymentAttempt::query()->create([
-            'payment_id' => $payment->id,
-            'operation' => 'refund',
-            'idempotency_key' => $idempotencyKey !== '' ? $idempotencyKey : $refund->public_id,
-            'status' => 'pending',
-        ]);
+        if ($amount->currency !== $payment->currency) {
+            throw new InvalidArgumentException('Refund currency does not match payment currency.');
+        }
 
-        $gateway = $this->resolveGateway($payment->gateway);
-        $result = $gateway->refund(new RefundPaymentData($payment, $refund, $attempt, $amount));
+        if ($idempotencyKey !== '') {
+            $existingAttempt = PaymentAttempt::query()
+                ->where('payment_id', $payment->id)
+                ->where('idempotency_key', $idempotencyKey)
+                ->where('operation', 'refund')
+                ->first();
 
-        if ($result->success) {
+            if ($existingAttempt !== null) {
+                $refund = Refund::query()
+                    ->where('payment_id', $payment->id)
+                    ->where('id', '>=', 1)
+                    ->latest()
+                    ->first();
+
+                if ($refund !== null && $existingAttempt->status === 'succeeded') {
+                    return $refund;
+                }
+            }
+        }
+
+        ['refund' => $refund, 'attempt' => $attempt] = DB::transaction(function () use ($payment, $amount, $reason, $idempotencyKey) {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+            $refundable = $locked->captured_minor - $locked->refunded_minor;
+
+            if ($amount->minorAmount > $refundable) {
+                throw new InvalidArgumentException("Refund amount [{$amount->minorAmount}] exceeds refundable [{$refundable}].");
+            }
+
+            $refund = Refund::query()->create([
+                'payment_id' => $locked->id,
+                'order_id' => $locked->order_id,
+                'amount_minor' => $amount->minorAmount,
+                'currency' => $amount->currency,
+                'status' => RefundStatus::Pending,
+                'reason' => $reason,
+            ]);
+
+            $attempt = PaymentAttempt::query()->create([
+                'payment_id' => $locked->id,
+                'operation' => 'refund',
+                'idempotency_key' => $idempotencyKey !== '' ? $idempotencyKey : $refund->public_id,
+                'status' => 'pending',
+            ]);
+
+            return ['refund' => $refund, 'attempt' => $attempt, 'payment' => $locked];
+        });
+
+        $payment = $payment->fresh();
+        $result = $this->gateways->for($payment->gateway)->refund(
+            new RefundPaymentData($payment, $refund, $attempt, $amount),
+        );
+
+        return DB::transaction(function () use ($payment, $refund, $attempt, $result) {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (! $result->success) {
+                $refund->update(['status' => RefundStatus::Failed]);
+                $attempt->update([
+                    'status' => 'failed',
+                    'error_code' => $result->failure?->code,
+                    'error_message' => $result->failure?->message,
+                ]);
+                $this->recalculateOrderPaymentStatus->execute($locked->order);
+
+                return $refund->fresh();
+            }
+
             PaymentTransaction::query()->create([
-                'payment_id' => $payment->id,
+                'payment_id' => $locked->id,
                 'attempt_id' => $attempt->id,
                 'type' => PaymentTransactionType::Refund,
                 'amount_minor' => $result->amount->minorAmount,
@@ -67,48 +121,39 @@ final class RefundPayment
                 'metadata' => $result->metadata,
             ]);
 
-            $refundedMinor = $payment->refunded_minor + $result->amount->minorAmount;
-            $paymentStatus = $refundedMinor >= $payment->captured_minor
+            $refundedMinor = (int) PaymentTransaction::query()
+                ->where('payment_id', $locked->id)
+                ->where('type', PaymentTransactionType::Refund)
+                ->where('status', 'succeeded')
+                ->sum('amount_minor');
+
+            $paymentStatus = $refundedMinor >= $locked->captured_minor
                 ? PaymentStatus::Refunded
                 : PaymentStatus::PartiallyRefunded;
 
-            $payment->update([
+            $locked->update([
                 'refunded_minor' => $refundedMinor,
                 'status' => $paymentStatus,
             ]);
 
-            $order = $payment->order;
-            $order->update(['refunded_total_minor' => $order->refunded_total_minor + $result->amount->minorAmount]);
+            $order = $locked->order;
+            $order->update(['refunded_total_minor' => $refundedMinor]);
 
             $refund->update([
                 'status' => RefundStatus::Succeeded,
                 'external_id' => $result->externalId,
             ]);
             $attempt->update(['status' => 'succeeded', 'external_id' => $result->externalId]);
-        } else {
-            $refund->update(['status' => RefundStatus::Failed]);
-            $attempt->update([
-                'status' => 'failed',
-                'error_code' => $result->failure?->code,
-                'error_message' => $result->failure?->message,
+
+            $this->dispatchCommerceWebhook('refund.created', [
+                'refund_id' => $refund->public_id,
+                'order_id' => $order->public_id,
+                'amount_minor' => $refund->amount_minor,
             ]);
-        }
 
-        $this->recalculateOrderPaymentStatus->execute($payment->order);
+            $this->recalculateOrderPaymentStatus->execute($order);
 
-        return $refund->fresh();
-    }
-
-    private function resolveGateway(string $name): PaymentGateway
-    {
-        return match ($name) {
-            'null' => app(NullPaymentGateway::class),
-            'manual' => app(ManualPaymentGateway::class),
-            'fake' => app(FakePaymentGateway::class),
-            'stripe' => app(StripePaymentGateway::class),
-            'paypal' => app(PayPalPaymentGateway::class),
-            'telr' => app(TelrPaymentGateway::class),
-            default => throw new InvalidArgumentException("Unknown payment gateway [{$name}]."),
-        };
+            return $refund->fresh();
+        });
     }
 }

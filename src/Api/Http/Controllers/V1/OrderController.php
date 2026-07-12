@@ -2,11 +2,16 @@
 
 namespace EzEcommerce\Api\Http\Controllers\V1;
 
+use EzEcommerce\Api\Http\Resources\FulfillmentResource;
 use EzEcommerce\Api\Http\Resources\OrderResource;
+use EzEcommerce\Api\Http\Resources\OrderTransitionResource;
 use EzEcommerce\Api\Http\Resources\PaymentResource;
+use EzEcommerce\Api\Http\Resources\PaymentTransactionResource;
 use EzEcommerce\Api\Http\Resources\RefundResource;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
+use EzEcommerce\Orders\Actions\CancelOrder;
+use EzEcommerce\Orders\Actions\CompleteOrder;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Orders\Models\OrderItem;
 use EzEcommerce\Orders\OrderManager;
@@ -15,8 +20,10 @@ use EzEcommerce\Payments\Actions\RetryPaymentSession;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Refunds\Actions\RefundPayment;
+use EzEcommerce\Refunds\Models\Refund;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Routing\Controller;
 
 final class OrderController extends Controller
@@ -26,6 +33,8 @@ final class OrderController extends Controller
         private readonly CapturePayment $capturePayment,
         private readonly RefundPayment $refundPayment,
         private readonly RetryPaymentSession $retryPaymentSession,
+        private readonly CancelOrder $cancelOrder,
+        private readonly CompleteOrder $completeOrder,
     ) {}
 
     public function show(Order $order): OrderResource
@@ -33,6 +42,65 @@ final class OrderController extends Controller
         $order->load('items', 'payments');
 
         return new OrderResource($order);
+    }
+
+    public function transitions(Order $order): AnonymousResourceCollection
+    {
+        return OrderTransitionResource::collection(
+            $order->transitions()->latest()->get(),
+        );
+    }
+
+    public function fulfillments(Order $order): AnonymousResourceCollection
+    {
+        return FulfillmentResource::collection(
+            $order->fulfillments()->latest()->get(),
+        );
+    }
+
+    public function refunds(Order $order): AnonymousResourceCollection
+    {
+        return RefundResource::collection(
+            Refund::query()->where('order_id', $order->id)->latest()->get(),
+        );
+    }
+
+    public function payments(Order $order): AnonymousResourceCollection
+    {
+        return PaymentResource::collection(
+            $order->payments()->latest()->get(),
+        );
+    }
+
+    public function paymentTransactions(Order $order, Payment $payment): AnonymousResourceCollection
+    {
+        abort_if($payment->order_id !== $order->id, 404);
+
+        return PaymentTransactionResource::collection(
+            $payment->transactions()->latest()->get(),
+        );
+    }
+
+    public function cancel(Request $request, Order $order): OrderResource
+    {
+        $validated = $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        $order = $this->cancelOrder->execute($order, $validated['reason'] ?? null);
+
+        return new OrderResource($order->load('items', 'payments'));
+    }
+
+    public function complete(Request $request, Order $order): OrderResource
+    {
+        $validated = $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        $order = $this->completeOrder->execute($order, $validated['reason'] ?? null);
+
+        return new OrderResource($order->load('items', 'payments'));
     }
 
     public function capture(Order $order): OrderResource

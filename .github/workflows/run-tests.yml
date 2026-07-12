@@ -2,7 +2,7 @@ name: run-tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
 
 jobs:
@@ -38,6 +38,7 @@ jobs:
           composer require "orchestra/testbench:${{ matrix.laravel == '11.*' && '^9.0' || (matrix.laravel == '12.*' && '^10.0' || '^11.0') }}" --dev --no-update
       - run: composer update --prefer-stable --prefer-lowest --no-interaction
       - run: vendor/bin/pest
+      - run: vendor/bin/phpstan analyse --memory-limit=512M
 
   mysql-hardening:
     name: Hardening (MySQL)
@@ -58,3 +59,10 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysql, pdo_mysql
       - run: composer install --prefer-stable --no-interaction
       - run: vendor/bin/pest --group=hardening
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: testing
+          DB_USERNAME: root
+          DB_PASSWORD: ''

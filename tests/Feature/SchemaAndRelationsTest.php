@@ -53,6 +53,7 @@ const COMMERCE_TABLES = [
     'commerce_inventory_balances',
     'commerce_inventory_movements',
     'commerce_inventory_reservations',
+    'commerce_order_addresses',
     'commerce_order_adjustments',
     'commerce_order_items',
     'commerce_order_transitions',
@@ -96,7 +97,9 @@ it('adds expected columns on altered tables', function () {
         ->and(Schema::hasColumn('commerce_products', 'vendor_id'))->toBeTrue()
         ->and(Schema::hasColumn('commerce_customers', 'company_id'))->toBeTrue()
         ->and(Schema::hasColumn('commerce_vendor_commissions', 'payout_id'))->toBeTrue()
-        ->and(Schema::hasColumn('commerce_addresses', 'country_code'))->toBeTrue();
+        ->and(Schema::hasColumn('commerce_addresses', 'country_code'))->toBeTrue()
+        ->and(Schema::hasColumn('commerce_customers', 'customer_group_id'))->toBeTrue()
+        ->and(Schema::hasColumn('commerce_carts', 'metadata'))->toBeTrue();
 });
 
 it('assigns public_id on models that use it', function () {
@@ -166,10 +169,7 @@ it('resolves order payment and item relations after checkout', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'relations-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'relations-'.uniqid());
 
     $order = Order::query()->with(['items', 'payments.attempts', 'cart', 'customer'])->findOrFail($result->order->id);
 
@@ -242,10 +242,7 @@ it('resolves return request item relations', function () {
     ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
-    $result = EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'return-rel-'.uniqid());
+    $result = placeCheckoutOrder($cart, 'return-rel-'.uniqid());
 
     $orderItem = $result->order->items->first();
     $return = ReturnRequest::query()->create([

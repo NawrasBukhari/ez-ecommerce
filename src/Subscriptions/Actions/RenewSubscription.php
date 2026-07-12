@@ -4,10 +4,13 @@ namespace EzEcommerce\Subscriptions\Actions;
 
 use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\SubscriptionStatus;
+use EzEcommerce\Core\Events\Concerns\DispatchesCommerceWebhooks;
 use EzEcommerce\Subscriptions\Models\Subscription;
 
 final class RenewSubscription
 {
+    use DispatchesCommerceWebhooks;
+
     public function __construct(
         private readonly Clock $clock,
         private readonly BillSubscriptionPeriod $billSubscriptionPeriod,
@@ -41,6 +44,13 @@ final class RenewSubscription
             'status' => SubscriptionStatus::Active,
         ]);
 
-        return $subscription->fresh();
+        $subscription = $subscription->fresh();
+
+        $this->dispatchCommerceWebhook('subscription.renewed', [
+            'subscription_id' => $subscription->public_id,
+            'customer_id' => $subscription->customer?->public_id,
+        ]);
+
+        return $subscription;
     }
 }

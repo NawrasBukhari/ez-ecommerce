@@ -86,10 +86,7 @@ it('pays vendor commissions via marketplace payout api', function () {
     EzEcommerce::cart()->addItem($cart, $variant, 1);
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
-    EzEcommerce::checkout()->for($cart)
-        ->shippingMethod('flat')
-        ->paymentMethod('manual')
-        ->place(idempotencyKey: 'payout-'.uniqid());
+    placeCheckoutOrder($cart, 'payout-'.uniqid());
 
     $commission = VendorCommission::query()
         ->where('vendor_id', $vendor->id)

@@ -7,6 +7,7 @@ use EzEcommerce\Api\Http\Resources\CustomerResource;
 use EzEcommerce\B2B\Models\Company;
 use EzEcommerce\CommerceManager;
 use EzEcommerce\Customers\Models\Customer;
+use EzEcommerce\Customers\Models\CustomerGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -33,6 +34,7 @@ final class CustomerController extends Controller
             'last_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:50'],
             'company_id' => ['sometimes', 'nullable', 'string'],
+            'customer_group_id' => ['sometimes', 'nullable', 'string'],
         ]);
 
         $companyId = null;
@@ -42,15 +44,23 @@ final class CustomerController extends Controller
                 ->value('id');
         }
 
+        $customerGroupId = null;
+        if (! empty($validated['customer_group_id'])) {
+            $customerGroupId = CustomerGroup::query()
+                ->where('public_id', $validated['customer_group_id'])
+                ->value('id');
+        }
+
         $customer = Customer::query()->create([
             'email' => $validated['email'],
             'first_name' => $validated['first_name'] ?? null,
             'last_name' => $validated['last_name'] ?? null,
             'phone' => $validated['phone'] ?? null,
             'company_id' => $companyId,
+            'customer_group_id' => $customerGroupId,
         ]);
 
-        $customer->load('company');
+        $customer->load('company', 'customerGroup');
 
         return (new CustomerResource($customer))
             ->response()

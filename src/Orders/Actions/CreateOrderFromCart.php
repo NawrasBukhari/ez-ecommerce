@@ -13,16 +13,14 @@ use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Marketplace\Actions\RecordVendorCommissions;
 use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Orders\Models\OrderAddress;
 use EzEcommerce\Orders\Models\OrderAdjustment;
 use EzEcommerce\Orders\Models\OrderItem;
-use EzEcommerce\Pricing\Contracts\PriceResolver;
-use EzEcommerce\Pricing\Data\PricingContext;
 use EzEcommerce\Stores\Contracts\StoreContext;
 
 final class CreateOrderFromCart
 {
     public function __construct(
-        private readonly PriceResolver $priceResolver,
         private readonly RecordOrderTransition $recordOrderTransition,
         private readonly AllocateLineDiscounts $allocateLineDiscounts,
         private readonly RecordVendorCommissions $recordVendorCommissions,
@@ -38,6 +36,11 @@ final class CreateOrderFromCart
         ?Address $billingAddress = null,
     ): Order {
         $cart->load('items.purchasable', 'adjustments');
+
+        $customerName = trim(trim((string) $customer->first_name).' '.trim((string) $customer->last_name));
+        if ($customerName === '') {
+            $customerName = (string) $customer->email;
+        }
 
         $metadata = [
             'shipping_address_id' => $shippingAddress?->id,
@@ -58,6 +61,9 @@ final class CreateOrderFromCart
         $order = Order::query()->create([
             'store_id' => $cart->store_id ?? $this->storeContext->id(),
             'customer_id' => $customer->id,
+            'customer_email' => $customer->email,
+            'customer_name' => $customerName,
+            'customer_phone' => $customer->phone,
             'cart_id' => $cart->id,
             'status' => OrderStatus::PendingPayment,
             'payment_status' => OrderPaymentStatus::Unpaid,
@@ -76,13 +82,7 @@ final class CreateOrderFromCart
 
         foreach ($cart->items as $cartItem) {
             $purchasable = $cartItem->purchasable;
-            $quote = $this->priceResolver->resolve($purchasable, new PricingContext(
-                currency: $cart->currency,
-                quantity: $cartItem->quantity,
-                customer: $customer,
-            ));
-
-            $lineSubtotal = $quote->unitPrice->multiply($cartItem->quantity);
+            $lineSubtotal = $cartItem->unit_price_minor * $cartItem->quantity;
 
             OrderItem::query()->create([
                 'order_id' => $order->id,
@@ -91,13 +91,13 @@ final class CreateOrderFromCart
                     ? $purchasable->sku
                     : ($purchasable->purchasableMetadata()['sku'] ?? null),
                 'quantity' => $cartItem->quantity,
-                'unit_price_minor' => $quote->unitPrice->minorAmount,
-                'subtotal_minor' => $lineSubtotal->minorAmount,
-                'total_minor' => $lineSubtotal->minorAmount,
-                'price_source' => $quote->source,
-                'price_record_id' => $quote->priceId,
-                'price_quote_hash' => $quote->fingerprint(),
-                'price_metadata' => $quote->metadata,
+                'unit_price_minor' => $cartItem->unit_price_minor,
+                'subtotal_minor' => $lineSubtotal,
+                'total_minor' => $lineSubtotal,
+                'price_source' => 'cart',
+                'price_record_id' => null,
+                'price_quote_hash' => hash('sha256', $cartItem->unit_price_minor.':'.$cartItem->quantity),
+                'price_metadata' => [],
                 'priced_at' => new DateTimeImmutable,
                 'product_snapshot' => array_merge($purchasable->purchasableMetadata(), [
                     'purchasable_type' => $cartItem->purchasable_type,
@@ -107,6 +107,9 @@ final class CreateOrderFromCart
                 ]),
             ]);
         }
+
+        $this->snapshotAddress($order, 'shipping', $shippingAddress);
+        $this->snapshotAddress($order, 'billing', $billingAddress);
 
         foreach ($cart->adjustments as $adjustment) {
             OrderAdjustment::query()->create([
@@ -136,6 +139,25 @@ final class CreateOrderFromCart
         $order = $this->allocateLineDiscounts->execute($order);
         $order = $this->recordVendorCommissions->execute($order);
 
-        return $order->fresh(['items', 'adjustments']);
+        return $order->fresh(['items', 'adjustments', 'addresses']);
+    }
+
+    private function snapshotAddress(Order $order, string $type, ?Address $address): void
+    {
+        if ($address === null) {
+            return;
+        }
+
+        OrderAddress::query()->create([
+            'order_id' => $order->id,
+            'type' => $type,
+            'line1' => $address->line1,
+            'line2' => $address->line2,
+            'city' => $address->city,
+            'state' => $address->state,
+            'postal_code' => $address->postal_code,
+            'country_code' => $address->country_code,
+            'metadata' => $address->metadata?->toArray(),
+        ]);
     }
 }

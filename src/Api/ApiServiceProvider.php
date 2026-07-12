@@ -8,16 +8,23 @@ use EzEcommerce\Api\Http\Middleware\ValidateCheckoutCartAccess;
 use EzEcommerce\B2B\Models\Company;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
+use EzEcommerce\Catalog\Models\Category;
 use EzEcommerce\Catalog\Models\Product;
 use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Customers\Models\Customer;
+use EzEcommerce\Customers\Models\CustomerGroup;
+use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Inventory\Models\Warehouse;
 use EzEcommerce\Marketplace\Models\Vendor;
+use EzEcommerce\Marketplace\Models\VendorPayout;
 use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Returns\Models\ReturnItem;
 use EzEcommerce\Returns\Models\ReturnRequest;
 use EzEcommerce\Stores\Models\Store;
 use EzEcommerce\Subscriptions\Models\Subscription;
+use EzEcommerce\Subscriptions\Models\SubscriptionPlan;
+use EzEcommerce\Webhooks\Outbound\Models\WebhookDelivery;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -122,6 +129,43 @@ class ApiServiceProvider extends ServiceProvider
                 ->where('cart_id', $cart->id)
                 ->where('id', $value)
                 ->firstOrFail();
+        });
+
+        Route::bind('category', function (string $value): Category {
+            return Category::query()
+                ->where('public_id', $value)
+                ->orWhere('slug', $value)
+                ->firstOrFail();
+        });
+
+        Route::bind('customerGroup', function (string $value): CustomerGroup {
+            return CustomerGroup::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('plan', function (string $value): SubscriptionPlan {
+            return SubscriptionPlan::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('payout', function (string $value): VendorPayout {
+            return VendorPayout::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('payment', function (string $value, $route): Payment {
+            /** @var Order $order */
+            $order = $route->parameter('order');
+
+            return Payment::query()
+                ->where('order_id', $order->id)
+                ->where('public_id', $value)
+                ->firstOrFail();
+        });
+
+        Route::bind('reservation', function (string $value): InventoryReservation {
+            return InventoryReservation::query()->findOrFail($value);
+        });
+
+        Route::bind('webhookDelivery', function (string $value): WebhookDelivery {
+            return WebhookDelivery::query()->findOrFail($value);
         });
     }
 }

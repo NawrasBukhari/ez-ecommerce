@@ -9,7 +9,7 @@
 
 **ez-ecommerce** is a headless Laravel commerce **engine** (not a storefront). It owns:
 
-- `commerce_*` database tables and migrations (44 files)
+- `commerce_*` database tables and migrations (48 files)
 - Cart → checkout → order → payment → fulfillment → refund → return flows
 - Inventory reservations with signed movements
 - Versioned REST API at `api/ez-commerce/v1`
@@ -34,7 +34,22 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Subscriptions** | `BillSubscriptionPeriod` on `commerce:renew-subscriptions` |
 | **Webhooks** | Inbound routes, outbound outbox + delivery jobs |
 | **Payments** | Telr refund HTTP call; `POST /orders/{id}/retry-payment` |
-| **Tests** | 52 Pest tests across 9 feature files |
+| **Tests** | 89 Pest tests across 13 feature files |
+
+### Shipped (backlog implementation)
+
+| Area | What landed |
+|------|-------------|
+| **Orders** | Cancel/complete API, transitions/fulfillments/refunds/payments read |
+| **Marketplace** | Commission + payout history read APIs |
+| **Subscriptions** | Subscription plans CRUD API |
+| **Customers** | Customer groups API + `customer_group_id` on create |
+| **Catalog** | Public categories, product filters, store scoping, category attach on create |
+| **Inventory** | Transfer, adjust, deactivate, movements read, reservation release |
+| **Cart** | Expiry enforcement, `price_list_id` on calculate/checkout |
+| **Shipping/Tax** | `GET /shipping-methods`, weight shipping + jurisdiction tax drivers |
+| **Webhooks** | Delivery retry, more outbound events, inbound event log API |
+| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records` |
 
 ### Still not built (do not assume)
 
@@ -49,7 +64,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 1. **`Purchasable` has no price method.** Always resolve price via `PriceResolver` / `PricingContext`.
 2. **Checkout returns `CheckoutResult`**, not a bare `Order`.
-3. **Never call payment gateways inside DB transactions.** `PlaceOrder` commits commercial state first, then `CreatePaymentSession` runs outside the transaction.
+3. **Never call payment gateways inside DB transactions.** `PlaceOrder` commits commercial state first, then `CreatePaymentSession` runs outside the inner commercial transaction. `IdempotencyStore` also runs the checkout callback outside any DB transaction (short txns only for record lock + completion/failure).
 4. **Refunds ≠ returns ≠ restock.** Three separate action families; do not merge them.
 5. **Polymorphic refs use morph aliases** (`commerce_product_variant`, etc.), not FQCNs. Register host models via `EzEcommerce::morphMap([...])`.
 6. **Orders, payments, inventory models are package-controlled** — not swappable via config class names.
@@ -68,7 +83,7 @@ src/
   Cart/             CartManager + cart actions (single ApplyDiscountCode in Cart/Actions)
   Catalog/          Product, ProductVariant, Category, contracts
   Checkout/         CheckoutManager, CheckoutBuilder, PlaceOrder
-  Commands/         commerce:install, release reservations, renew subscriptions
+  Commands/         commerce:install, release reservations, renew subscriptions, purge carts/idempotency
   Core/             Money, Clock, Idempotency, enums, events, OutboxMessage
   Customers/        Customer, Address, CustomerResolver
   Discounts/        Discount model only (cart actions live in Cart/)
@@ -87,7 +102,7 @@ src/
   Webhooks/         Inbound controller + outbound dispatch/delivery
 routes/api.php      Versioned REST API
 database/migrations commerce_* tables
-tests/Feature/      42 Pest tests — see README test matrix
+tests/Feature/      81 Pest tests — see README test matrix
 ```
 
 ---
@@ -158,10 +173,10 @@ All default `true`. Disabling only stops gated code paths; tables still migrate.
 
 | Flag | What works | Gaps |
 |------|------------|------|
-| `api` | Full REST surface + bearer auth | No inventory admin API |
-| `subscriptions` | CRUD API, renew + `BillSubscriptionPeriod` | No PSP dunning |
-| `marketplace` | Commissions + vendor API | No payouts |
-| `multi_store` | `store_id`, header, stores API | No per-store policies |
+| `api` | Full REST surface + bearer auth | Inventory ops, order lifecycle reads |
+| `subscriptions` | CRUD API, plans API, renew + `BillSubscriptionPeriod` | No PSP dunning |
+| `marketplace` | Commissions + vendor API + payout/commission reads | No bank transfers |
+| `multi_store` | `store_id`, header, stores API, product scoping | No per-store policies |
 | `b2b` | `net_terms`, companies API | No credit limits |
 | `outbound_webhooks` | Outbox + signed delivery jobs | Host must run queue worker |
 
@@ -188,7 +203,7 @@ All default `true`. Disabling only stops gated code paths; tables still migrate.
 1. **Adding `price()` to `Purchasable`** — rejected by design.
 2. **Calling Stripe inside `DB::transaction`** — causes deadlocks and double charges.
 3. **Using FQCN in `purchasable_type`** — breaks morph map; use aliases.
-4. **Expecting `features.*` to add routes** — `api` flag gates the API provider; others gate listeners/metadata.
+4. **Expecting `features.*` to add routes** — `api` flag gates the API provider; `subscriptions`, `marketplace`, `b2b`, and `outbound_webhooks` default **off** and gate their service providers. Enable in config (and in tests via `TestCase`) before using those modules.
 5. **Using `country` column on addresses** — DB column is `country_code`; API accepts `country` in JSON.
 6. **Assuming tests = full PSP coverage** — Stripe/PayPal/Telr live paths are not integration-tested.
 7. **Creating `commerce:migrate`** — migrations auto-load; host runs `migrate`.
