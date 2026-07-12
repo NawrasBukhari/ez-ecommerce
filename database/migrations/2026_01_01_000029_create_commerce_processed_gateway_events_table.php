@@ -17,7 +17,7 @@ return new class extends Migration
             $table->timestamp('processed_at');
             $table->timestamps();
 
-            $table->unique(['gateway', 'external_event_id']);
+            $table->unique(['gateway', 'external_event_id'], 'commerce_gateway_events_dedup_unique');
         });
     }
 
