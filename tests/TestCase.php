@@ -22,6 +22,7 @@ abstract class TestCase extends Orchestra
             'driver' => 'sqlite',
             'database' => ':memory:',
             'prefix' => '',
+            'foreign_key_constraints' => true,
         ]);
         config()->set('ez-ecommerce.currency.default', 'AED');
         config()->set('ez-ecommerce.tax.rate', 0.05);
