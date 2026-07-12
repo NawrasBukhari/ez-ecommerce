@@ -6,9 +6,10 @@ use EzEcommerce\Cart\Actions\CalculateCartTotals;
 use EzEcommerce\Cart\Exceptions\CartTotalsChangedException;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Checkout\CheckoutResult;
+use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Core\Enums\CheckoutStatus;
-use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Events\OrderPlaced;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Support\CanonicalJson;
@@ -226,8 +227,41 @@ final class PlaceOrder
                     'message' => $paymentFailure->message,
                     'retryable' => $paymentFailure->retryable,
                 ] : null,
+                'payment_session' => $this->sessionPayload($sessionResult),
             ],
         ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function sessionPayload(?PaymentSessionResult $session): ?array
+    {
+        if ($session === null) {
+            return null;
+        }
+
+        return [
+            'session_status' => $session->status->value,
+            'external_id' => $session->externalId,
+            'redirect_url' => $session->redirectUrl,
+            'client_secret' => $session->clientSecret,
+            'session_metadata' => $session->metadata,
+        ];
+    }
+
+    /** @param  array<string, mixed>|null  $data */
+    private function hydrateSession(?array $data): ?PaymentSessionResult
+    {
+        if ($data === null) {
+            return null;
+        }
+
+        return new PaymentSessionResult(
+            status: PaymentStatus::from($data['session_status']),
+            externalId: $data['external_id'] ?? null,
+            redirectUrl: $data['redirect_url'] ?? null,
+            clientSecret: $data['client_secret'] ?? null,
+            metadata: $data['session_metadata'] ?? [],
+        );
     }
 
     /** @param  array<string, mixed>  $cached */
@@ -239,7 +273,7 @@ final class PlaceOrder
         return new CheckoutResult(
             order: $order,
             payment: $payment,
-            paymentSession: null,
+            paymentSession: $this->hydrateSession($cached['payment_session'] ?? null),
             status: CheckoutStatus::from($cached['status']),
             paymentFailure: isset($cached['payment_failure'])
                 ? new PaymentFailure(

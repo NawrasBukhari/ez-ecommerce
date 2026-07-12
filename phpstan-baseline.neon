@@ -493,43 +493,13 @@ parameters:
 			path: src/Inventory/Actions/AdjustStock.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\|Illuminate\\Database\\Eloquent\\Collection\<int, EzEcommerce\\Inventory\\Models\\InventoryBalance\>\:\:\$on_hand\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\:\:\$on_hand\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Inventory/Actions/CommitReservation.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\|Illuminate\\Database\\Eloquent\\Collection\<int, EzEcommerce\\Inventory\\Models\\InventoryBalance\>\:\:\$reserved\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/CommitReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$balance_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/CommitReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$expires_at\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/CommitReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$order_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/CommitReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$quantity\.$#'
-			identifier: property.notFound
-			count: 4
-			path: src/Inventory/Actions/CommitReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$status\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\:\:\$reserved\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Inventory/Actions/CommitReservation.php
@@ -541,25 +511,7 @@ parameters:
 			path: src/Inventory/Actions/ReceiveStock.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$balance_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseExpiredReservations.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$order_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseExpiredReservations.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseExpiredReservations.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\|Illuminate\\Database\\Eloquent\\Collection\<int, EzEcommerce\\Orders\\Models\\Order\>\:\:\$status\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Inventory/Actions/ReleaseExpiredReservations.php
@@ -571,31 +523,7 @@ parameters:
 			path: src/Inventory/Actions/ReleaseExpiredReservations.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\|Illuminate\\Database\\Eloquent\\Collection\<int, EzEcommerce\\Inventory\\Models\\InventoryBalance\>\:\:\$reserved\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseInventoryReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$balance_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseInventoryReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$order_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseInventoryReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$quantity\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Inventory/Actions/ReleaseInventoryReservation.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryReservation\:\:\$status\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\:\:\$reserved\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Inventory/Actions/ReleaseInventoryReservation.php
@@ -1197,12 +1125,6 @@ parameters:
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
 			identifier: property.notFound
-			count: 1
-			path: src/Payments/Drivers/StripePaymentGateway.php
-
-		-
-			message: '#^Property EzEcommerce\\Payments\\Drivers\\StripePaymentGateway\:\:\$client has unknown class Stripe\\StripeClient as its type\.$#'
-			identifier: class.notFound
 			count: 1
 			path: src/Payments/Drivers/StripePaymentGateway.php
 

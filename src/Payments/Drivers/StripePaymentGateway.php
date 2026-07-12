@@ -16,15 +16,14 @@ use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
-use Stripe\StripeClient;
 
 final class StripePaymentGateway implements PaymentGateway
 {
-    private StripeClient $client;
+    private object $client;
 
     public function __construct()
     {
-        if (! class_exists(StripeClient::class)) {
+        if (! class_exists(\Stripe\StripeClient::class)) {
             throw PaymentDriverNotInstalled::for('stripe', 'stripe/stripe-php');
         }
 
@@ -33,7 +32,7 @@ final class StripePaymentGateway implements PaymentGateway
             throw PaymentDriverNotInstalled::notConfigured('stripe');
         }
 
-        $this->client = new StripeClient($secret);
+        $this->client = new \Stripe\StripeClient($secret);
     }
 
     public function capabilities(): PaymentGatewayCapabilities

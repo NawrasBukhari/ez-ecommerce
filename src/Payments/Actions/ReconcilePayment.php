@@ -3,6 +3,7 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Contracts\Clock;
+use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Data\GatewayWebhookEvent;
@@ -92,7 +93,7 @@ final class ReconcilePayment
 
                 try {
                     $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment);
-                } catch (ReservationExpiredException $e) {
+                } catch (ReservationExpiredException|InventoryCommitException $e) {
                     $record->update([
                         'status' => 'failed',
                         'last_error' => $e->getMessage(),

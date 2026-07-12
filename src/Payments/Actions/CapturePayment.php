@@ -2,7 +2,6 @@
 
 namespace EzEcommerce\Payments\Actions;
 
-use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Data\CapturePaymentData;
@@ -52,7 +51,18 @@ final class CapturePayment
         });
 
         $gateway = $this->gateways->for($payment->gateway);
-        $result = $gateway->capture(new CapturePaymentData($payment, $attempt, $amount));
+
+        try {
+            $result = $gateway->capture(new CapturePaymentData($payment, $attempt, $amount));
+        } catch (\Throwable $e) {
+            $attempt->update([
+                'status' => 'unknown',
+                'error_code' => 'capture_exception',
+                'error_message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
 
         if ($result->success) {
             try {
@@ -66,7 +76,7 @@ final class CapturePayment
                 );
             } catch (\Throwable $e) {
                 $attempt->update([
-                    'status' => 'failed',
+                    'status' => 'unknown',
                     'error_code' => 'finalize_failed',
                     'error_message' => $e->getMessage(),
                 ]);
@@ -79,7 +89,6 @@ final class CapturePayment
                 'error_code' => $result->failure?->code,
                 'error_message' => $result->failure?->message,
             ]);
-            $payment->update(['status' => PaymentStatus::Failed]);
             $this->recalculateOrderPaymentStatus->execute($payment->order);
         }
 

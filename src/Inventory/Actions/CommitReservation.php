@@ -4,12 +4,14 @@ namespace EzEcommerce\Inventory\Actions;
 
 use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\ReservationStatus;
+use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Inventory\Models\InventoryBalance;
 use EzEcommerce\Inventory\Models\InventoryMovement;
 use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Orders\Models\Order;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 final class CommitReservation
 {
@@ -35,11 +37,36 @@ final class CommitReservation
         DB::transaction(function () use ($order) {
             $reservations = InventoryReservation::query()
                 ->where('order_id', $order->id)
-                ->where('status', ReservationStatus::Active)
                 ->lockForUpdate()
                 ->get();
 
-            foreach ($reservations as $reservation) {
+            $uncommitted = $reservations->filter(
+                fn (InventoryReservation $reservation) => $reservation->status !== ReservationStatus::Committed,
+            );
+
+            if ($uncommitted->isEmpty()) {
+                return;
+            }
+
+            foreach ($uncommitted as $reservation) {
+                if ($reservation->status === ReservationStatus::Expired) {
+                    throw ReservationExpiredException::forReservation($reservation->id);
+                }
+
+                if ($reservation->status === ReservationStatus::Released) {
+                    throw InventoryCommitException::reservationsReleased($order->id);
+                }
+
+                if ($reservation->status !== ReservationStatus::Active) {
+                    throw InventoryCommitException::uncommittedReservationsUnavailable($order->id);
+                }
+
+                if ($reservation->expires_at !== null && $reservation->expires_at < $this->clock->now()) {
+                    throw ReservationExpiredException::forReservation($reservation->id);
+                }
+            }
+
+            foreach ($uncommitted as $reservation) {
                 $this->commitLocked($reservation);
             }
         });
@@ -57,9 +84,21 @@ final class CommitReservation
 
         $balance = InventoryBalance::query()->lockForUpdate()->findOrFail($locked->balance_id);
 
+        if ($balance->reserved < $locked->quantity) {
+            throw new InvalidArgumentException(
+                "Balance [{$balance->id}] reserved [{$balance->reserved}] is less than reservation quantity [{$locked->quantity}].",
+            );
+        }
+
+        if ($balance->on_hand < $locked->quantity) {
+            throw new InvalidArgumentException(
+                "Balance [{$balance->id}] on_hand [{$balance->on_hand}] is less than reservation quantity [{$locked->quantity}].",
+            );
+        }
+
         $balance->update([
-            'reserved' => max(0, $balance->reserved - $locked->quantity),
-            'on_hand' => max(0, $balance->on_hand - $locked->quantity),
+            'reserved' => $balance->reserved - $locked->quantity,
+            'on_hand' => $balance->on_hand - $locked->quantity,
         ]);
 
         InventoryMovement::query()->create([

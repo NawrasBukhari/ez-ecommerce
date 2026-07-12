@@ -2,9 +2,11 @@
 
 namespace EzEcommerce\Payments\Actions;
 
+use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Events\OrderPaid;
 use EzEcommerce\Inventory\Actions\CommitReservation;
+use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
@@ -49,7 +51,7 @@ final class FinalizeAcceptedPayment
         return $payment->fresh();
     }
 
-    /** @throws ReservationExpiredException */
+    /** @throws ReservationExpiredException|InventoryCommitException */
     public function completeOrderAfterCapture(Payment $payment): void
     {
         $payment->refresh();
@@ -57,8 +59,10 @@ final class FinalizeAcceptedPayment
 
         if ($payment->status === PaymentStatus::Captured) {
             $this->commitReservation->executeForOrder($order);
-            $this->confirmOrderOnPaymentAccepted->execute($order);
-            Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+
+            if ($this->confirmOrderOnPaymentAccepted->execute($order)) {
+                Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+            }
 
             return;
         }

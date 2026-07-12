@@ -8,6 +8,13 @@ use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Orders\Models\Order;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property ReservationStatus $status
+ * @property int $quantity
+ * @property int|null $order_id
+ * @property int $balance_id
+ * @property \DateTimeImmutable|null $expires_at
+ */
 class InventoryReservation extends CommerceModel
 {
     protected $table = 'commerce_inventory_reservations';

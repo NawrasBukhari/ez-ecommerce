@@ -16,7 +16,7 @@ return new class extends Migration
             $table->unsignedInteger('quantity');
             $table->timestamps();
 
-            $table->index(['purchasable_type', 'purchasable_id']);
+            $table->index(['purchasable_type', 'purchasable_id'], 'commerce_sub_items_purchasable_idx');
         });
     }
 

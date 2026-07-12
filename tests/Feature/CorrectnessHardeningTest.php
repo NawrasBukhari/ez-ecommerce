@@ -96,3 +96,89 @@ it('returns cached checkout after payment session failure', function () {
     expect($second->payment->id)->toBe($first->payment->id);
     expect($second->status)->toBe(CheckoutStatus::PaymentSessionFailed);
 })->group('hardening');
+
+it('persists checkout payment session for redirect gateways', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 1000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+
+    $key = 'idem-session-'.uniqid();
+    $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
+    $hash = EzEcommerce::cart()->totalsHash($cart, 'flat');
+
+    $first = EzEcommerce::checkout()->for($cart)
+        ->shippingMethod('flat')
+        ->paymentMethod('fake')
+        ->place(idempotencyKey: $key, expectedTotalsHash: $hash);
+
+    expect($first->status)->toBe(CheckoutStatus::RequiresAction);
+    expect($first->paymentSession)->not->toBeNull();
+    expect($first->paymentSession->clientSecret)->not->toBeNull();
+
+    $second = EzEcommerce::checkout()->for($cart->fresh())
+        ->shippingMethod('flat')
+        ->paymentMethod('fake')
+        ->place(idempotencyKey: $key, expectedTotalsHash: $hash);
+
+    expect($second->paymentSession?->externalId)->toBe($first->paymentSession?->externalId);
+})->group('hardening');
+
+it('does not confirm order when reservations are expired', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'expired-res-'.uniqid());
+
+    $order = $result->order->fresh();
+    $order->reservations()->update(['status' => \EzEcommerce\Core\Enums\ReservationStatus::Expired]);
+
+    $payment = $result->payment;
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+
+    expect(fn () => app(CapturePayment::class)->execute($payment, $attempt))
+        ->toThrow(\EzEcommerce\Inventory\Exceptions\ReservationExpiredException::class);
+
+    expect($order->fresh()->status)->toBe(OrderStatus::PendingPayment);
+})->group('hardening');
+
+it('keeps partially captured payment status when a follow-up capture fails', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'partial-cap-'.uniqid());
+
+    $payment = $result->payment;
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+
+    app(\EzEcommerce\Payments\Actions\ApplyPaymentCapture::class)->execute(
+        $payment,
+        $attempt,
+        4000,
+        'AED',
+        'partial-capture-1',
+    );
+    $attempt->update(['status' => 'succeeded']);
+
+    $payment = $payment->fresh();
+    expect($payment->status)->toBe(\EzEcommerce\Core\Enums\PaymentStatus::PartiallyCaptured);
+
+    $this->app->instance(\EzEcommerce\Payments\Drivers\FakePaymentGateway::class, new \EzEcommerce\Payments\Drivers\FakePaymentGateway(
+        captureResult: new \EzEcommerce\Payments\Data\PaymentResult(
+            success: false,
+            status: \EzEcommerce\Core\Enums\PaymentStatus::Failed,
+            amount: Money::fromMinor(6000, 'AED'),
+            failure: new \EzEcommerce\Payments\Data\PaymentFailure('declined', 'Capture declined', false),
+        ),
+    ));
+
+    $secondAttempt = PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'create_session',
+        'idempotency_key' => 'partial-capture-2',
+        'status' => 'succeeded',
+    ]);
+
+    app(CapturePayment::class)->execute($payment, $secondAttempt, Money::fromMinor(6000, 'AED'));
+
+    expect($payment->fresh()->status)->toBe(\EzEcommerce\Core\Enums\PaymentStatus::PartiallyCaptured);
+})->group('hardening');

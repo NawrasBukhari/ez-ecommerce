@@ -17,6 +17,7 @@ use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Models\Refund;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use RuntimeException;
 
 final class RefundPayment
 {
@@ -50,13 +51,19 @@ final class RefundPayment
                 ->first();
 
             if ($existingAttempt !== null) {
-                if ($existingAttempt->status === 'succeeded') {
-                    $refundId = $existingAttempt->request_metadata instanceof \ArrayObject
-                        ? $existingAttempt->request_metadata['refund_id'] ?? null
-                        : ($existingAttempt->request_metadata['refund_id'] ?? null);
+                $refundId = $existingAttempt->request_metadata instanceof \ArrayObject
+                    ? $existingAttempt->request_metadata['refund_id'] ?? null
+                    : ($existingAttempt->request_metadata['refund_id'] ?? null);
 
-                    if ($refundId !== null) {
-                        return Refund::query()->findOrFail((int) $refundId);
+                if ($refundId !== null) {
+                    $refund = Refund::query()->find((int) $refundId);
+                    if ($refund !== null) {
+                        return match ($existingAttempt->status) {
+                            'succeeded', 'failed' => $refund,
+                            'pending' => throw new RuntimeException('Refund with this idempotency key is already in progress.'),
+                            'unknown' => throw new RuntimeException('Refund with this idempotency key requires reconciliation.'),
+                            default => $refund,
+                        };
                     }
                 }
             }
@@ -64,7 +71,23 @@ final class RefundPayment
 
         ['refund' => $refund, 'attempt' => $attempt] = DB::transaction(function () use ($payment, $amount, $reason, $idempotencyKey) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
-            $refundable = $locked->captured_minor - $locked->refunded_minor;
+
+            $pendingAttempt = PaymentAttempt::query()
+                ->where('payment_id', $locked->id)
+                ->where('operation', 'refund')
+                ->where('status', 'pending')
+                ->exists();
+
+            if ($pendingAttempt) {
+                throw new RuntimeException('A refund is already in progress for this payment.');
+            }
+
+            $pendingRefundMinor = (int) Refund::query()
+                ->where('payment_id', $locked->id)
+                ->where('status', RefundStatus::Pending)
+                ->sum('amount_minor');
+
+            $refundable = $locked->captured_minor - $locked->refunded_minor - $pendingRefundMinor;
 
             if ($amount->minorAmount > $refundable) {
                 throw new InvalidArgumentException("Refund amount [{$amount->minorAmount}] exceeds refundable [{$refundable}].");
@@ -91,9 +114,20 @@ final class RefundPayment
         });
 
         $payment = $payment->fresh();
-        $result = $this->gateways->for($payment->gateway)->refund(
-            new RefundPaymentData($payment, $refund, $attempt, $amount),
-        );
+
+        try {
+            $result = $this->gateways->for($payment->gateway)->refund(
+                new RefundPaymentData($payment, $refund, $attempt, $amount),
+            );
+        } catch (\Throwable $e) {
+            $attempt->update([
+                'status' => 'unknown',
+                'error_code' => 'refund_exception',
+                'error_message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
 
         return DB::transaction(function () use ($payment, $refund, $attempt, $result) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
@@ -110,7 +144,11 @@ final class RefundPayment
                 return $refund->fresh();
             }
 
-            $refundable = $locked->captured_minor - $locked->refunded_minor;
+            $refundable = $locked->captured_minor - $locked->refunded_minor - (int) Refund::query()
+                ->where('payment_id', $locked->id)
+                ->where('status', RefundStatus::Pending)
+                ->where('id', '!=', $refund->id)
+                ->sum('amount_minor');
             if ($result->amount->minorAmount > $refundable) {
                 $refund->update(['status' => RefundStatus::Failed]);
                 $attempt->update([

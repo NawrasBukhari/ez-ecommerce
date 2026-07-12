@@ -13,16 +13,16 @@ final class ConfirmOrderOnPaymentAccepted
         private readonly RecordOrderTransition $recordOrderTransition,
     ) {}
 
-    public function execute(Order $order): Order
+    public function execute(Order $order): bool
     {
         $order->refresh();
 
         if ($order->status !== OrderStatus::PendingPayment) {
-            return $order;
+            return false;
         }
 
         if (! in_array($order->payment_status, [OrderPaymentStatus::Paid, OrderPaymentStatus::PartiallyPaid], true)) {
-            return $order;
+            return false;
         }
 
         $from = $order->status->value;
@@ -35,6 +35,6 @@ final class ConfirmOrderOnPaymentAccepted
             'Order confirmed after payment accepted',
         );
 
-        return $order->fresh();
+        return true;
     }
 }
