@@ -15,14 +15,14 @@ class Warehouse extends CommerceModel
     protected $fillable = [
         'name',
         'code',
-        'is_default',
+        'is_active',
         'metadata',
     ];
 
     protected function casts(): array
     {
         return [
-            'is_default' => 'boolean',
+            'is_active' => 'boolean',
             'metadata' => AsArrayObject::class,
         ];
     }

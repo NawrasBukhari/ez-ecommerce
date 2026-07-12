@@ -19,6 +19,7 @@ class VendorCommission extends CommerceModel
         'amount_minor',
         'currency',
         'status',
+        'payout_id',
     ];
 
     protected function casts(): array
@@ -41,5 +42,10 @@ class VendorCommission extends CommerceModel
     public function vendor(): BelongsTo
     {
         return $this->belongsTo(Vendor::class);
+    }
+
+    public function payout(): BelongsTo
+    {
+        return $this->belongsTo(VendorPayout::class, 'payout_id');
     }
 }

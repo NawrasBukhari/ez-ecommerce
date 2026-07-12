@@ -4,6 +4,8 @@ namespace EzEcommerce\Webhooks\Inbound\Http\Controllers;
 
 use EzEcommerce\Payments\Actions\ReconcilePayment;
 use EzEcommerce\Payments\Data\WebhookRequestData;
+use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
+use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,6 +59,15 @@ final class InboundWebhookController extends Controller
             return;
         }
 
+        if ($gateway === 'paypal') {
+            $webhookId = config('ez-ecommerce.drivers.payment.paypal.webhook_id');
+            if (is_string($webhookId) && $webhookId !== '') {
+                $this->verifyPayPalSignature($request, $payload);
+
+                return;
+            }
+        }
+
         if (in_array($gateway, ['fake', 'null', 'manual'], true)) {
             return;
         }
@@ -91,6 +102,15 @@ final class InboundWebhookController extends Controller
             Webhook::constructEvent($payload, $signature, $secret);
         } catch (\UnexpectedValueException|SignatureVerificationException) {
             abort(400, 'Invalid Stripe webhook signature.');
+        }
+    }
+
+    private function verifyPayPalSignature(Request $request, string $payload): void
+    {
+        try {
+            app(PayPalPaymentGateway::class)->verifyWebhookSignature($payload, $request);
+        } catch (PaymentDriverNotInstalled) {
+            abort(403, 'PayPal is not configured.');
         }
     }
 }

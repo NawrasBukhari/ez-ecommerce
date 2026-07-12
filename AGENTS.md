@@ -34,17 +34,14 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Subscriptions** | `BillSubscriptionPeriod` on `commerce:renew-subscriptions` |
 | **Webhooks** | Inbound routes, outbound outbox + delivery jobs |
 | **Payments** | Telr refund HTTP call; `POST /orders/{id}/retry-payment` |
-| **Tests** | 42 Pest tests across 8 feature files |
+| **Tests** | 52 Pest tests across 9 feature files |
 
 ### Still not built (do not assume)
 
 - Storefront / admin UI
-- Customer cart creation API (merge expects an existing customer cart)
-- Inventory admin REST API
-- Marketplace vendor payouts
-- Native PayPal webhook crypto verification (shared-secret gate exists)
+- Catalog update/delete API
+- Automated PSP payout transfers (payout records commissions as paid)
 - `currency.rounding` config (unused)
-- Per-endpoint RBAC (single `COMMERCE_API_TOKEN` = full admin API)
 
 ---
 
@@ -125,15 +122,19 @@ tests/Feature/      42 Pest tests — see README test matrix
 
 | Routes | Auth |
 |--------|------|
-| Products, `POST /cart/guest` | Public |
+| Products read, `POST /cart/guest` | Public |
 | Cart CRUD, discount, calculate | `X-Guest-Cart-Token` |
 | `POST /checkout` | `X-Guest-Cart-Token` + `Idempotency-Key` |
-| Orders, returns, customers, admin CRUD, `POST /cart/merge` | `Authorization: Bearer {COMMERCE_API_TOKEN}` or `X-Commerce-Api-Token` |
-| Inbound webhooks | Stripe signature or `X-Commerce-Webhook-Secret` |
+| Protected routes | Bearer token + **scope** (e.g. `catalog.write`, `orders.read`) |
+| `POST /customers/{id}/cart` | `customers.write` |
+| `POST /products` | `catalog.write` |
+| `POST /warehouses/{id}/receive` | `inventory.write` |
+| `POST /vendors/{id}/payouts` | `marketplace.write` |
+| Inbound webhooks | Stripe signature, PayPal native verify (`PAYPAL_WEBHOOK_ID`) or shared secret |
 
-Empty `COMMERCE_API_TOKEN` → protected routes return **503** (fail closed).
+Empty `COMMERCE_API_TOKEN` with no scoped tokens → protected routes return **503**.
 
-Boolean env vars (`COMMERCE_API_ALLOW_UNAUTHENTICATED`, `COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED`) are parsed with `filter_var(..., FILTER_VALIDATE_BOOLEAN)` in config.
+Scoped tokens via `COMMERCE_API_*_TOKEN` env vars in config `api.scoped_tokens`. `*` = admin. `.write` implies `.read` for the same prefix.
 
 ---
 

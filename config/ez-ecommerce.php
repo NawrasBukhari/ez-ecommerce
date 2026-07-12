@@ -24,6 +24,7 @@ return [
                 'client_id' => env('PAYPAL_CLIENT_ID'),
                 'client_secret' => env('PAYPAL_CLIENT_SECRET'),
                 'mode' => env('PAYPAL_MODE', 'sandbox'),
+                'webhook_id' => env('PAYPAL_WEBHOOK_ID'),
             ],
             'telr' => [
                 'store_id' => env('TELR_STORE_ID'),
@@ -83,6 +84,18 @@ return [
         'middleware' => ['api'],
         'token' => env('COMMERCE_API_TOKEN'),
         'allow_unauthenticated' => filter_var(env('COMMERCE_API_ALLOW_UNAUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
+        'scoped_tokens' => array_filter(array_merge(
+            filled(env('COMMERCE_API_TOKEN')) ? [env('COMMERCE_API_TOKEN') => ['*']] : [],
+            filled(env('COMMERCE_API_CATALOG_TOKEN')) ? [env('COMMERCE_API_CATALOG_TOKEN') => ['catalog.read', 'catalog.write']] : [],
+            filled(env('COMMERCE_API_INVENTORY_TOKEN')) ? [env('COMMERCE_API_INVENTORY_TOKEN') => ['inventory.read', 'inventory.write']] : [],
+            filled(env('COMMERCE_API_ORDERS_TOKEN')) ? [env('COMMERCE_API_ORDERS_TOKEN') => ['orders.read', 'orders.write', 'returns.read', 'returns.write']] : [],
+            filled(env('COMMERCE_API_CUSTOMERS_TOKEN')) ? [env('COMMERCE_API_CUSTOMERS_TOKEN') => ['customers.read', 'customers.write']] : [],
+            filled(env('COMMERCE_API_MARKETPLACE_TOKEN')) ? [env('COMMERCE_API_MARKETPLACE_TOKEN') => ['marketplace.read', 'marketplace.write']] : [],
+            filled(env('COMMERCE_API_STORES_TOKEN')) ? [env('COMMERCE_API_STORES_TOKEN') => ['stores.read', 'stores.write']] : [],
+            filled(env('COMMERCE_API_COMPANIES_TOKEN')) ? [env('COMMERCE_API_COMPANIES_TOKEN') => ['companies.read', 'companies.write']] : [],
+            filled(env('COMMERCE_API_SUBSCRIPTIONS_TOKEN')) ? [env('COMMERCE_API_SUBSCRIPTIONS_TOKEN') => ['subscriptions.read', 'subscriptions.write']] : [],
+            filled(env('COMMERCE_API_ADMIN_TOKEN')) ? [env('COMMERCE_API_ADMIN_TOKEN') => ['*']] : [],
+        ), static fn (mixed $scopes, mixed $token): bool => is_string($token) && $token !== '' && is_array($scopes), ARRAY_FILTER_USE_BOTH),
     ],
 
     'inbound_webhooks' => [

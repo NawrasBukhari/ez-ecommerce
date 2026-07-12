@@ -2,8 +2,10 @@
 
 namespace EzEcommerce\Api\Http\Controllers\V1;
 
+use EzEcommerce\Api\Http\Resources\CartResource;
 use EzEcommerce\Api\Http\Resources\CustomerResource;
 use EzEcommerce\B2B\Models\Company;
+use EzEcommerce\CommerceManager;
 use EzEcommerce\Customers\Models\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +14,10 @@ use Illuminate\Routing\Controller;
 
 final class CustomerController extends Controller
 {
+    public function __construct(
+        private readonly CommerceManager $commerce,
+    ) {}
+
     public function index(): AnonymousResourceCollection
     {
         return CustomerResource::collection(
@@ -56,5 +62,22 @@ final class CustomerController extends Controller
         $customer->load(['company', 'addresses']);
 
         return new CustomerResource($customer);
+    }
+
+    public function storeCart(Request $request, Customer $customer): JsonResponse
+    {
+        $validated = $request->validate([
+            'currency' => ['sometimes', 'string', 'size:3'],
+        ]);
+
+        $cart = $this->commerce->cart()->createCustomer(
+            $customer,
+            $validated['currency'] ?? config('ez-ecommerce.currency.default', 'AED'),
+        );
+        $cart->load('items.purchasable');
+
+        return (new CartResource($cart))
+            ->response()
+            ->setStatusCode(201);
     }
 }

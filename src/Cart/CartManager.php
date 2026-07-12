@@ -5,20 +5,23 @@ namespace EzEcommerce\Cart;
 use EzEcommerce\Cart\Actions\AddItemToCart;
 use EzEcommerce\Cart\Actions\ApplyDiscountCode;
 use EzEcommerce\Cart\Actions\CalculateCartTotals;
+use EzEcommerce\Cart\Actions\CreateCustomerCart;
 use EzEcommerce\Cart\Actions\CreateGuestCart;
 use EzEcommerce\Cart\Actions\MergeCarts;
-use EzEcommerce\Cart\Actions\RemoveDiscountCode;
 use EzEcommerce\Cart\Actions\RemoveCartItem;
+use EzEcommerce\Cart\Actions\RemoveDiscountCode;
 use EzEcommerce\Cart\Actions\UpdateCartItem;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
 use EzEcommerce\Catalog\Contracts\Purchasable;
 use EzEcommerce\Customers\Models\Address;
+use EzEcommerce\Customers\Models\Customer;
 
 final class CartManager
 {
     public function __construct(
         private readonly CreateGuestCart $createGuestCart,
+        private readonly CreateCustomerCart $createCustomerCart,
         private readonly AddItemToCart $addItemToCart,
         private readonly UpdateCartItem $updateCartItem,
         private readonly RemoveCartItem $removeCartItem,
@@ -32,6 +35,11 @@ final class CartManager
     public function createGuest(string $currency, ?string $guestToken = null): array
     {
         return $this->createGuestCart->execute($currency, $guestToken);
+    }
+
+    public function createCustomer(Customer $customer, string $currency): Cart
+    {
+        return $this->createCustomerCart->execute($customer, $currency);
     }
 
     public function addItem(Cart $cart, Purchasable $purchasable, int $quantity, ?int $expectedVersion = null): CartItem

@@ -16,6 +16,7 @@ use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 final class PayPalPaymentGateway implements PaymentGateway
@@ -132,12 +133,50 @@ final class PayPalPaymentGateway implements PaymentGateway
     public function parseWebhook(WebhookRequestData $data): GatewayWebhookEvent
     {
         $payload = json_decode($data->payload, true, 512, JSON_THROW_ON_ERROR);
+        $resource = $payload['resource'] ?? [];
+
+        $paymentExternalId = $resource['id']
+            ?? $resource['supplementary_data']['related_ids']['order_id']
+            ?? $payload['resource']['purchase_units'][0]['reference_id']
+            ?? null;
+
+        $amountMinor = null;
+        $currency = null;
+        if (isset($resource['amount']['value'], $resource['amount']['currency_code'])) {
+            $amountMinor = (int) round((float) $resource['amount']['value'] * 100);
+            $currency = strtoupper((string) $resource['amount']['currency_code']);
+        }
 
         return new GatewayWebhookEvent(
             eventType: $payload['event_type'] ?? 'unknown',
             externalId: $payload['id'] ?? hash('sha256', $data->payload),
-            paymentExternalId: $payload['resource']['id'] ?? null,
+            paymentExternalId: $paymentExternalId,
+            amountMinor: $amountMinor,
+            currency: $currency,
         );
+    }
+
+    public function verifyWebhookSignature(string $payload, Request $request): void
+    {
+        $webhookId = config('ez-ecommerce.drivers.payment.paypal.webhook_id');
+        if ($webhookId === null || $webhookId === '') {
+            abort(403, 'PayPal webhook ID is not configured.');
+        }
+
+        $response = Http::withToken($this->accessToken())
+            ->post("{$this->baseUrl}/v1/notifications/verify-webhook-signature", [
+                'auth_algo' => $request->header('PAYPAL-AUTH-ALGO'),
+                'cert_url' => $request->header('PAYPAL-CERT-URL'),
+                'transmission_id' => $request->header('PAYPAL-TRANSMISSION-ID'),
+                'transmission_sig' => $request->header('PAYPAL-TRANSMISSION-SIG'),
+                'transmission_time' => $request->header('PAYPAL-TRANSMISSION-TIME'),
+                'webhook_id' => $webhookId,
+                'webhook_event' => json_decode($payload, true, 512, JSON_THROW_ON_ERROR),
+            ]);
+
+        if (($response->json('verification_status') ?? '') !== 'SUCCESS') {
+            abort(400, 'Invalid PayPal webhook signature.');
+        }
     }
 
     private function accessToken(): string

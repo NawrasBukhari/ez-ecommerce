@@ -24,6 +24,7 @@ class Product extends CommerceModel
     protected $table = 'commerce_products';
 
     protected $fillable = [
+        'store_id',
         'name',
         'slug',
         'description',

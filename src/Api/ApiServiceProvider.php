@@ -11,6 +11,7 @@ use EzEcommerce\Cart\Models\CartItem;
 use EzEcommerce\Catalog\Models\Product;
 use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Customers\Models\Customer;
+use EzEcommerce\Inventory\Models\Warehouse;
 use EzEcommerce\Marketplace\Models\Vendor;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Returns\Models\ReturnItem;
@@ -107,6 +108,10 @@ class ApiServiceProvider extends ServiceProvider
                 ->where('return_id', $return->id)
                 ->where('id', $value)
                 ->firstOrFail();
+        });
+
+        Route::bind('warehouse', function (string $value): Warehouse {
+            return Warehouse::query()->where('public_id', $value)->firstOrFail();
         });
 
         Route::bind('item', function (string $value, $route): CartItem {

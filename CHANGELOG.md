@@ -24,15 +24,23 @@ All notable changes to `ez-ecommerce/ez-ecommerce` are documented in this file.
 - B2B net terms checkout (`payment_method: net_terms`) with companies API.
 - Outbound webhooks with outbox, signed delivery jobs, and endpoint tracking.
 - Artisan commands: `commerce:install`, `commerce:release-expired-reservations`, `commerce:renew-subscriptions`.
-- 44 package migrations (`commerce_*` tables).
-- 42 Pest tests across 8 feature files.
+- 46 package migrations (`commerce_*` tables).
+- 52 Pest tests across 9 feature files.
 
 ### Security
 
-- Fail-closed API token middleware (`503` when token unset).
+- Fail-closed API token middleware (`503` when no tokens configured).
+- Per-route API scopes via `api.scoped_tokens`.
 - Checkout cart access validation middleware.
 - Gateway-specific payment capture allowlist in `ReconcilePayment`.
+- PayPal native webhook signature verification when `PAYPAL_WEBHOOK_ID` is set.
 - Boolean env parsing for `allow_unauthenticated` / `allow_unsigned`.
+
+### Added (backlog sprint)
+
+- `POST /customers/{id}/cart`, catalog write, inventory admin, vendor payouts API.
+- `commerce_vendor_payouts` table + `PayVendorCommissions` action.
+- Scoped API tokens (`catalog`, `inventory`, `orders`, `customers`, `marketplace`, etc.).
 
 ### Changed
 

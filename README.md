@@ -201,18 +201,15 @@ This is a **headless engine**. No storefront, admin panel, product editor, or ch
 
 ### Remaining API gaps
 
-- Customer cart creation endpoint (merge expects an existing customer cart)
-- Inventory admin REST API
-- Product/catalog write API
+- Catalog update/delete endpoints
+- Product variant-only CRUD
 
 ### Remaining product gaps
 
 | Item | Status |
 |------|--------|
-| Marketplace payouts | Not implemented |
-| Native PayPal webhook signatures | Shared-secret gate only |
+| Automated PSP payout transfers | Payout API marks commissions paid; no bank transfer |
 | `currency.rounding` config | Defined, never read |
-| Per-route API RBAC | Single shared admin token |
 
 ### Unwired by design
 
@@ -339,37 +336,41 @@ EzEcommerce::checkout()->for($cart)
 | `POST` | `/cart/{id}/calculate` | `{ "shipping_method" }` |
 | `POST` | `/checkout` | `{ "cart_id", "shipping_method", "payment_method" }` + headers |
 
-### Protected routes (bearer token)
+### Protected routes (bearer token + scope)
 
-| Method | Path | Notes |
-|--------|------|-------|
-| `POST` | `/cart/merge` | `{ "guest_cart_id", "customer_cart_id", "guest_token" }` |
-| `GET` | `/orders/{id}` | — |
-| `POST` | `/orders/{id}/capture` | Manual gateway capture |
-| `POST` | `/orders/{id}/fulfill` | `{ "order_item_id", "quantity" }` |
-| `POST` | `/orders/{id}/refund` | `{ "amount_minor", "reason"? }` |
-| `POST` | `/orders/{id}/retry-payment` | Re-create payment session |
-| `POST` | `/orders/{id}/returns` | `{ "reason"?, "lines": [{ "order_item_id", "quantity", "restock"? }] }` |
-| `GET` | `/returns` | Paginated list |
-| `GET` | `/returns/{id}` | — |
-| `POST` | `/returns/{id}/receive` | Mark received |
-| `POST` | `/returns/{id}/items/{itemId}/restock` | `{ "warehouse_id"?, "idempotency_key"? }` |
-| `POST` | `/returns/{id}/items/{itemId}/mark-damaged` | — |
-| `GET` | `/customers` | — |
-| `POST` | `/customers` | `{ "email", "first_name"?, ... }` |
-| `GET` | `/customers/{id}` | Includes addresses |
-| `GET/POST` | `/customers/{id}/addresses` | Address CRUD (POST uses `country` → `country_code`) |
-| `GET` | `/stores`, `POST /stores`, `GET /stores/{id}` | Multi-store |
-| `GET` | `/companies`, `POST /companies`, `GET /companies/{id}` | B2B |
-| `GET` | `/vendors`, `POST /vendors`, `GET /vendors/{id}` | Marketplace |
-| `GET` | `/subscriptions`, `POST /subscriptions`, `GET /subscriptions/{id}` | Subscriptions |
+Scopes: `catalog`, `inventory`, `orders`, `returns`, `customers`, `stores`, `companies`, `marketplace`, `subscriptions` — each with `.read` / `.write`. `COMMERCE_API_TOKEN` grants `*`. `.write` includes `.read` for the same prefix.
+
+| Method | Path | Scope | Notes |
+|--------|------|-------|-------|
+| `POST` | `/cart/merge` | `customers.write` | Guest → customer cart |
+| `POST` | `/customers/{id}/cart` | `customers.write` | Create or return active customer cart |
+| `POST` | `/products` | `catalog.write` | Product + variant + price + optional stock |
+| `GET/POST` | `/warehouses` | `inventory.read` / `inventory.write` | List / create warehouses |
+| `POST` | `/warehouses/{id}/receive` | `inventory.write` | Receive stock |
+| `POST` | `/vendors/{id}/payouts` | `marketplace.write` | Pay pending commissions |
+| `GET` | `/orders/{id}` | `orders.read` | — |
+| `POST` | `/orders/{id}/capture` | `orders.write` | Manual gateway capture |
+| `POST` | `/orders/{id}/fulfill` | `orders.write` | `{ "order_item_id", "quantity" }` |
+| `POST` | `/orders/{id}/refund` | `orders.write` | `{ "amount_minor", "reason"? }` |
+| `POST` | `/orders/{id}/retry-payment` | `orders.write` | Re-create payment session |
+| `POST` | `/orders/{id}/returns` | `orders.write` | Create return request |
+| `GET` | `/returns`, `/returns/{id}` | `returns.read` | — |
+| `POST` | `/returns/{id}/receive` | `returns.write` | Mark received |
+| `POST` | `/returns/{id}/items/{itemId}/restock` | `returns.write` | Restock item |
+| `POST` | `/returns/{id}/items/{itemId}/mark-damaged` | `returns.write` | Mark damaged |
+| `GET/POST` | `/customers`, `/customers/{id}` | `customers.read` / `customers.write` | — |
+| `GET/POST` | `/customers/{id}/addresses` | `customers.read` / `customers.write` | `country` → `country_code` |
+| `GET/POST` | `/stores` | `stores.read` / `stores.write` | Multi-store |
+| `GET/POST` | `/companies` | `companies.read` / `companies.write` | B2B |
+| `GET/POST` | `/vendors` | `marketplace.read` / `marketplace.write` | Marketplace |
+| `GET/POST` | `/subscriptions` | `subscriptions.read` / `subscriptions.write` | Subscriptions |
 
 ### Webhooks
 
 | Method | Path | Auth |
 |--------|------|------|
 | `POST` | `/webhooks/stripe` | `Stripe-Signature` + `STRIPE_WEBHOOK_SECRET` |
-| `POST` | `/webhooks/paypal` | `X-Commerce-Webhook-Secret` |
+| `POST` | `/webhooks/paypal` | Native verify when `PAYPAL_WEBHOOK_ID` set; else `X-Commerce-Webhook-Secret` |
 | `POST` | `/webhooks/telr` | `X-Commerce-Webhook-Secret` |
 | `POST` | `/webhooks/fake` | Local/testing only |
 
@@ -429,7 +430,8 @@ Disabling a flag does **not** skip migrations — tables still exist.
 | `inventory.reservation_ttl.*` | Minutes to hold stock per payment method |
 | `cart.guest_ttl_days` | Guest cart expiry |
 | `multi_store.default_store_id` | Fallback store when no header |
-| `api.token` / `api.allow_unauthenticated` | REST bearer auth |
+| `api.token` / `api.allow_unauthenticated` | Legacy admin token / dev bypass |
+| `api.scoped_tokens` | Per-token scope map (`COMMERCE_API_*_TOKEN` env vars) |
 | `api.prefix` / `api.middleware` | REST API routing |
 | `inbound_webhooks.shared_secret` / `allow_unsigned` | PayPal/Telr webhook auth |
 | `outbound_webhooks.secret` | HMAC signing key |
@@ -516,16 +518,17 @@ vendor/bin/phpstan analyse
 
 ## Test coverage honesty
 
-**42 tests. 8 files.** Core commerce, API, security, webhooks, subscriptions, marketplace, returns, sprint endpoints.
+**52 tests. 9 files.** Core commerce, API, security, webhooks, subscriptions, marketplace, returns, sprint + backlog endpoints.
 
 | Test file | Coverage |
 |-----------|----------|
 | `CommerceFlowTest` | Boot, features, cart→checkout, idempotency, money |
 | `HardeningTest` | Capture, fulfill, refund, idempotency replay, OOS, null gateway |
 | `ApiTest` | Products, guest cart, checkout validation |
-| `SecurityTest` | Fail-closed API token, checkout cart token, webhook auth, capture allowlist |
+| `SecurityTest` | Fail-closed API, scopes, checkout token, Stripe/PayPal webhook auth |
 | `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions |
 | `SprintApiTest` | Customers, addresses, cart merge, retry payment, returns API |
+| `BacklogApiTest` | Customer cart, catalog write, inventory admin, payouts, scoped tokens |
 | `ModulesTest` | Discounts, pricing, subscriptions, returns, money allocate |
 | `ModulesExtendedTest` | Outbox webhooks, inbound webhooks, fake gateway, renew+bill, marketplace commission, reservations |
 
@@ -533,12 +536,9 @@ vendor/bin/phpstan analyse
 
 ## Sprint backlog (next up)
 
-1. **Customer cart API** — `POST /customers/{id}/cart` for login merge flows
-2. **Inventory admin API** — receive stock, warehouses
-3. **Catalog write API** — create/update products and variants
-4. **Marketplace payouts** — vendor settlement records
-5. **Native PayPal webhook verification**
-6. **Per-route API scopes** — replace single shared token
+1. **Catalog update/delete API**
+2. **Automated bank/PSP payout transfers** (payout API records paid commissions today)
+3. **Customer-authenticated cart routes** (host user → customer, not only admin token)
 
 See [`AGENTS.md`](AGENTS.md) for agent-specific rules when implementing these.
 
