@@ -14,7 +14,8 @@ final class CreateSubscription
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Customer $customer,

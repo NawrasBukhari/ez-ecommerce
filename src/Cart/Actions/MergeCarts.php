@@ -10,7 +10,8 @@ final class MergeCarts
 {
     public function __construct(
         private readonly CalculateCartTotals $calculateCartTotals,
-    ) {}
+    ) {
+    }
 
     public function execute(Cart $guestCart, Cart $customerCart): Cart
     {

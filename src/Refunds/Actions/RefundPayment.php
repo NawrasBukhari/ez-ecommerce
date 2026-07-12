@@ -32,7 +32,8 @@ final class RefundPayment
         private readonly PaymentGatewayRegistry $gateways,
         private readonly ResolveProviderPaymentReference $providerReference,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Payment $payment,

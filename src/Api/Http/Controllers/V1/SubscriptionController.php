@@ -16,7 +16,8 @@ final class SubscriptionController extends Controller
 {
     public function __construct(
         private readonly CreateSubscription $createSubscription,
-    ) {}
+    ) {
+    }
 
     public function index(): AnonymousResourceCollection
     {

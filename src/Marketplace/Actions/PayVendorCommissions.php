@@ -13,7 +13,8 @@ final class PayVendorCommissions
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     /**
      * @param  list<int>|null  $commissionIds

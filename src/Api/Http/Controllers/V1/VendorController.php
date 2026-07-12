@@ -19,7 +19,8 @@ final class VendorController extends Controller
 {
     public function __construct(
         private readonly PayVendorCommissions $payVendorCommissions,
-    ) {}
+    ) {
+    }
 
     public function index(): AnonymousResourceCollection
     {

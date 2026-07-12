@@ -9,7 +9,8 @@ final class CheckoutManager
 {
     public function __construct(
         private readonly PlaceOrder $placeOrder,
-    ) {}
+    ) {
+    }
 
     public function for(Cart $cart): CheckoutBuilder
     {

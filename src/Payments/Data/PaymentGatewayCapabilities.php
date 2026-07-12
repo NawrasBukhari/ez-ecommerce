@@ -10,5 +10,6 @@ final readonly class PaymentGatewayCapabilities
         public bool $capture = false,
         public bool $refund = false,
         public bool $webhooks = false,
-    ) {}
+    ) {
+    }
 }

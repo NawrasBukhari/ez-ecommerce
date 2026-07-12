@@ -14,7 +14,8 @@ final class OrderManager
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly RecalculateOrderFulfillmentStatus $recalculateOrderFulfillmentStatus,
         private readonly CreateFulfillment $createFulfillment,
-    ) {}
+    ) {
+    }
 
     public function recalculatePaymentStatus(Order $order): Order
     {

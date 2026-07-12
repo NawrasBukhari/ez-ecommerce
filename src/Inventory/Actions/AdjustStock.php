@@ -14,7 +14,8 @@ final class AdjustStock
 {
     public function __construct(
         private readonly ReceiveStock $receiveStock,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Warehouse $warehouse,

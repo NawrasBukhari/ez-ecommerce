@@ -10,5 +10,6 @@ final readonly class TaxResult
     public function __construct(
         public Money $total,
         public array $breakdown = [],
-    ) {}
+    ) {
+    }
 }

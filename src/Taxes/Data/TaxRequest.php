@@ -14,5 +14,6 @@ final readonly class TaxRequest
         public Money $shippingTotal,
         public ?Address $shippingAddress = null,
         public array $lines = [],
-    ) {}
+    ) {
+    }
 }

@@ -16,7 +16,8 @@ final class ApplyDiscountCode
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     public function execute(Cart $cart, string $code, ?int $expectedVersion = null): Cart
     {

@@ -24,7 +24,9 @@ final class ReconcilePayment
         private readonly ApplyPaymentCapture $applyPaymentCapture,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
-    ) {}
+        private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
+    ) {
+    }
 
     public function execute(WebhookRequestData $request): GatewayWebhookEvent
     {
@@ -33,7 +35,7 @@ final class ReconcilePayment
 
         $existing = ProcessedGatewayEvent::query()
             ->where('gateway', $request->gateway)
-            ->where('external_event_id', $event->externalId)
+            ->where('external_event_id', $event->eventId)
             ->first();
 
         if ($existing !== null && $existing->status === 'processed') {
@@ -53,7 +55,7 @@ final class ReconcilePayment
             DB::transaction(function () use ($request, $event, $payment) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
-                    ->where('external_event_id', $event->externalId)
+                    ->where('external_event_id', $event->eventId)
                     ->lockForUpdate()
                     ->first();
 
@@ -64,7 +66,7 @@ final class ReconcilePayment
                 if ($record === null) {
                     $record = ProcessedGatewayEvent::query()->create([
                         'gateway' => $request->gateway,
-                        'external_event_id' => $event->externalId,
+                        'external_event_id' => $event->eventId,
                         'event_type' => $event->eventType,
                         'payload' => json_decode($request->payload, true, 512, JSON_THROW_ON_ERROR),
                         'status' => 'processing',
@@ -83,12 +85,14 @@ final class ReconcilePayment
 
                 $wasFullyCaptured = $payment->status === PaymentStatus::Captured;
 
+                $transactionReference = $event->transactionReference ?? $event->paymentReference;
+
                 $payment = $this->applyPaymentCapture->execute(
                     $payment,
                     null,
                     $amountMinor,
                     $event->currency ?? $payment->currency,
-                    $event->externalId,
+                    $transactionReference,
                     $event->metadata,
                 );
 
@@ -97,12 +101,7 @@ final class ReconcilePayment
                 try {
                     $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment, $wasFullyCaptured);
                 } catch (ReservationExpiredException|InventoryCommitException $e) {
-                    $order = $payment->order;
-                    $metadata = $order->metadata instanceof \ArrayObject
-                        ? $order->metadata->getArrayCopy()
-                        : (array) ($order->metadata ?? []);
-                    $metadata['manual_review_required'] = 'inventory_exception';
-                    $order->update(['metadata' => $metadata]);
+                    $this->recordInventoryFinalizationFailure->execute($payment, null, $e->getMessage());
 
                     $record->update([
                         'status' => 'failed',
@@ -127,20 +126,26 @@ final class ReconcilePayment
 
     private function findPayment(GatewayWebhookEvent $event): ?Payment
     {
-        if ($event->paymentExternalId === null) {
+        $reference = $event->paymentReference;
+        if ($reference === null) {
             return null;
         }
 
         $attempt = PaymentAttempt::query()
-            ->where('external_id', $event->paymentExternalId)
+            ->where('external_id', $reference)
             ->first();
 
         if ($attempt !== null) {
             return $attempt->payment;
         }
 
+        $payment = Payment::query()->where('public_id', $reference)->first();
+        if ($payment !== null) {
+            return $payment;
+        }
+
         return Payment::query()
-            ->whereHas('attempts', fn ($q) => $q->where('external_id', $event->paymentExternalId))
+            ->whereHas('order', fn ($query) => $query->where('public_id', $reference))
             ->first();
     }
 
@@ -150,11 +155,9 @@ final class ReconcilePayment
             'stripe' => in_array($eventType, [
                 'payment_intent.succeeded',
                 'charge.captured',
-                'checkout.session.completed',
             ], true),
             'paypal' => in_array($eventType, [
                 'PAYMENT.CAPTURE.COMPLETED',
-                'CHECKOUT.ORDER.APPROVED',
                 'PAYMENT.SALE.COMPLETED',
             ], true),
             'telr' => in_array($eventType, ['authorised', 'paid', 'success'], true),

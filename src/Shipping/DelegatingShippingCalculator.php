@@ -11,7 +11,8 @@ final class DelegatingShippingCalculator implements ShippingCalculator
     public function __construct(
         private readonly FlatShippingCalculator $flat,
         private readonly WeightShippingCalculator $weight,
-    ) {}
+    ) {
+    }
 
     public function quote(ShippingRequest $request): ShippingMethodQuote
     {

@@ -13,7 +13,8 @@ final readonly class CustomerIdentity
         public ?string $lastName = null,
         public ?string $phone = null,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 
     public function isGuest(): bool
     {

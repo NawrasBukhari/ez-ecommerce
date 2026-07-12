@@ -7,7 +7,8 @@ final readonly class InventoryAllocation
     /** @param  list<WarehouseAllocation>  $allocations */
     public function __construct(
         public array $allocations,
-    ) {}
+    ) {
+    }
 
     public function totalQuantity(): int
     {

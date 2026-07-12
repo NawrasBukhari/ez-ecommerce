@@ -16,7 +16,8 @@ final class CreatePaymentSession
     public function __construct(
         private readonly PaymentGatewayRegistry $gateways,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
-    ) {}
+    ) {
+    }
 
     public function execute(Payment $payment, PaymentAttempt $attempt, Order $order): PaymentSessionResult
     {

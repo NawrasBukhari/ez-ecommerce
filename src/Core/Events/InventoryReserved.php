@@ -10,5 +10,6 @@ final readonly class InventoryReserved implements ShouldDispatchAfterCommit
         public int $reservationId,
         public int $orderId,
         public int $balanceId,
-    ) {}
+    ) {
+    }
 }

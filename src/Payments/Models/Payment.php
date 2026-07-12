@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property PaymentStatus $status
+ * @property string $public_id
  * @property string $gateway
  * @property string $currency
  * @property int $order_id

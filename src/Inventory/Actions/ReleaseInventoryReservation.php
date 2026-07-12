@@ -12,7 +12,8 @@ final class ReleaseInventoryReservation
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     public function execute(InventoryReservation $reservation): InventoryReservation
     {

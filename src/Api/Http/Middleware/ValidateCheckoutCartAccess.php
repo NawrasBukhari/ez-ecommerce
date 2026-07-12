@@ -23,6 +23,11 @@ final class ValidateCheckoutCartAccess
 
         $this->rejectIfCartExpired($cart);
 
+        if (! $this->guestTokenMatches($request, $cart)
+            && ! ($cart->customer_id !== null && $this->customerOwnsCart($request, $cart))) {
+            abort(403, 'Unauthorized cart access.');
+        }
+
         if ($request->filled('price_list_id')) {
             $metadata = $cart->metadata instanceof \ArrayObject
                 ? $cart->metadata->getArrayCopy()
@@ -31,15 +36,7 @@ final class ValidateCheckoutCartAccess
             $cart->update(['metadata' => $metadata]);
         }
 
-        if ($this->guestTokenMatches($request, $cart)) {
-            return $next($request);
-        }
-
-        if ($cart->customer_id !== null && $this->customerOwnsCart($request, $cart)) {
-            return $next($request);
-        }
-
-        abort(403, 'Unauthorized cart access.');
+        return $next($request);
     }
 
     private function guestTokenMatches(Request $request, Cart $cart): bool

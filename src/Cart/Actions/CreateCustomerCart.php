@@ -11,7 +11,8 @@ final class CreateCustomerCart
 {
     public function __construct(
         private readonly StoreContext $storeContext,
-    ) {}
+    ) {
+    }
 
     public function execute(Customer $customer, string $currency): Cart
     {

@@ -14,7 +14,8 @@ final readonly class PaymentSessionResult
         public ?string $clientSecret = null,
         public ?PaymentFailure $failure = null,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 
     public function succeeded(): bool
     {

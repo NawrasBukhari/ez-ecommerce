@@ -11,6 +11,7 @@ use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -21,10 +22,56 @@ final class CapturePayment
         private readonly ResolveProviderPaymentReference $providerReference,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-    ) {}
+        private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
+    ) {
+    }
+
+    public function executeForPayment(Payment $payment, ?Money $amount = null): PaymentResult
+    {
+        $attempt = DB::transaction(function () use ($payment, $amount) {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            $captureAmount = $amount ?? Money::fromMinor(
+                $locked->amount_minor - $locked->captured_minor,
+                $locked->currency,
+            );
+
+            if ($captureAmount->minorAmount <= 0) {
+                throw new InvalidArgumentException('Nothing left to capture.');
+            }
+
+            $inFlightCapture = PaymentAttempt::query()
+                ->where('payment_id', $locked->id)
+                ->where('operation', 'capture')
+                ->whereIn('status', ['pending', 'unknown'])
+                ->exists();
+
+            if ($inFlightCapture) {
+                throw new RuntimeException('A capture is in progress or requires reconciliation for this payment.');
+            }
+
+            return PaymentAttempt::query()->create([
+                'payment_id' => $locked->id,
+                'operation' => 'capture',
+                'idempotency_key' => 'capture:'.$locked->public_id.':'.Str::uuid(),
+                'status' => 'pending',
+                'request_metadata' => [
+                    'requested_amount_minor' => $captureAmount->minorAmount,
+                    'currency' => $captureAmount->currency,
+                    'provider_operation' => 'capture',
+                ],
+            ]);
+        });
+
+        return $this->execute($payment->fresh(), $attempt, $amount);
+    }
 
     public function execute(Payment $payment, PaymentAttempt $attempt, ?Money $amount = null): PaymentResult
     {
+        if ($attempt->operation !== 'capture') {
+            return $this->executeForPayment($payment, $amount);
+        }
+
         ['payment' => $payment, 'amount' => $amount] = DB::transaction(function () use ($payment, $amount, $attempt) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
@@ -105,6 +152,7 @@ final class CapturePayment
                     'error_code' => 'finalize_failed',
                     'error_message' => $e->getMessage(),
                 ]);
+                $this->recordInventoryFinalizationFailure->execute($payment, $attempt, $e->getMessage());
 
                 throw $e;
             }

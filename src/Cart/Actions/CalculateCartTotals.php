@@ -27,7 +27,8 @@ final class CalculateCartTotals
         private readonly PriceResolver $priceResolver,
         private readonly TaxCalculator $taxCalculator,
         private readonly ShippingCalculator $shippingCalculator,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Cart $cart,

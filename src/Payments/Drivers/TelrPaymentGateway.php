@@ -17,7 +17,7 @@ use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Str;
+use RuntimeException;
 
 final class TelrPaymentGateway implements PaymentGateway
 {
@@ -43,14 +43,12 @@ final class TelrPaymentGateway implements PaymentGateway
     {
         return new PaymentGatewayCapabilities(
             sessions: true,
-            capture: true,
             webhooks: true,
         );
     }
 
     public function createSession(CreatePaymentSessionData $data): PaymentSessionResult
     {
-        $reference = $data->attempt->public_id;
         $response = Http::post($this->endpoint, [
             'method' => 'create',
             'store' => $this->storeId,
@@ -67,27 +65,25 @@ final class TelrPaymentGateway implements PaymentGateway
                 'declined' => config('ez-ecommerce.drivers.payment.telr.return_url'),
                 'cancelled' => config('ez-ecommerce.drivers.payment.telr.return_url'),
             ],
-        ]);
+        ])->throw();
 
         $body = $response->json();
-        $ref = $body['order']['ref'] ?? ('telr_'.Str::lower(Str::random(12)));
+        $ref = $body['order']['ref'] ?? null;
+        if (! is_string($ref) || $ref === '') {
+            throw new RuntimeException('Telr session creation did not return an order reference.');
+        }
 
         return new PaymentSessionResult(
             status: PaymentStatus::RequiresAction,
             externalId: $ref,
             redirectUrl: $body['order']['url'] ?? config('ez-ecommerce.drivers.payment.telr.checkout_url').'?ref='.$ref,
-            metadata: ['telr_reference' => $reference],
+            metadata: ['telr_reference' => $data->attempt->public_id],
         );
     }
 
     public function capture(CapturePaymentData $data): PaymentResult
     {
-        return new PaymentResult(
-            success: true,
-            status: PaymentStatus::Captured,
-            amount: $data->amount,
-            externalId: $data->providerReference ?? $data->attempt->external_id ?? 'telr_capture_'.$data->attempt->id,
-        );
+        throw PaymentOperationNotSupported::for('telr', 'capture');
     }
 
     public function refund(RefundPaymentData $data): RefundResult
@@ -105,15 +101,15 @@ final class TelrPaymentGateway implements PaymentGateway
                 'ref' => $ref,
                 'amount' => number_format($data->amount->minorAmount / 100, 2, '.', ''),
             ],
-        ]);
+        ])->throw();
 
         $body = $response->json();
         $accepted = ($body['order']['status'] ?? '') === 'accepted'
             || ($body['order']['message'] ?? '') === 'Accepted';
 
         return new RefundResult(
-            success: $accepted || $response->successful(),
-            status: RefundStatus::Succeeded,
+            success: $accepted,
+            status: $accepted ? RefundStatus::Succeeded : RefundStatus::Failed,
             amount: $data->amount,
             externalId: $body['order']['ref'] ?? ('telr_refund_'.$data->attempt->public_id),
         );
@@ -123,10 +119,13 @@ final class TelrPaymentGateway implements PaymentGateway
     {
         parse_str($data->payload, $fields);
 
+        $transactionReference = $fields['tran_ref'] ?? null;
+
         return new GatewayWebhookEvent(
             eventType: $fields['tran_status'] ?? 'telr.webhook',
-            externalId: $fields['tran_ref'] ?? hash('sha256', $data->payload),
-            paymentExternalId: $fields['cartid'] ?? null,
+            eventId: is_string($transactionReference) ? $transactionReference : hash('sha256', $data->payload),
+            paymentReference: $fields['cartid'] ?? null,
+            transactionReference: is_string($transactionReference) ? $transactionReference : null,
             amountMinor: isset($fields['tran_amount']) ? (int) round((float) $fields['tran_amount'] * 100) : null,
             currency: isset($fields['tran_currency']) ? strtoupper((string) $fields['tran_currency']) : null,
         );

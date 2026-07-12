@@ -52,6 +52,7 @@ final class StripePaymentGateway implements PaymentGateway
         $intent = $this->client->paymentIntents->create([
             'amount' => $data->amount->minorAmount,
             'currency' => strtolower($data->amount->currency),
+            'capture_method' => 'manual',
             'metadata' => array_merge($data->metadata, [
                 'payment_public_id' => $data->payment->public_id,
                 'attempt_public_id' => $data->attempt->public_id,
@@ -114,10 +115,21 @@ final class StripePaymentGateway implements PaymentGateway
         $type = $payload['type'] ?? 'unknown';
         $object = $payload['data']['object'] ?? [];
 
+        $paymentReference = match ($type) {
+            'charge.captured' => $object['payment_intent'] ?? null,
+            default => $object['id'] ?? null,
+        };
+
+        $transactionReference = match ($type) {
+            'charge.captured' => $object['id'] ?? null,
+            default => $object['latest_charge'] ?? $object['id'] ?? null,
+        };
+
         return new GatewayWebhookEvent(
             eventType: $type,
-            externalId: $payload['id'] ?? hash('sha256', $data->payload),
-            paymentExternalId: $object['id'] ?? null,
+            eventId: $payload['id'] ?? hash('sha256', $data->payload),
+            paymentReference: is_string($paymentReference) ? $paymentReference : null,
+            transactionReference: is_string($transactionReference) ? $transactionReference : null,
             amountMinor: isset($object['amount']) ? (int) $object['amount'] : null,
             currency: isset($object['currency']) ? strtoupper((string) $object['currency']) : null,
         );

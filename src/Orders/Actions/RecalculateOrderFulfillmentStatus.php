@@ -10,7 +10,8 @@ final class RecalculateOrderFulfillmentStatus
 {
     public function __construct(
         private readonly RecordOrderTransition $recordOrderTransition,
-    ) {}
+    ) {
+    }
 
     public function execute(Order $order): Order
     {

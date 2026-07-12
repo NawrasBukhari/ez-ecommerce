@@ -18,7 +18,6 @@ use EzEcommerce\Orders\OrderManager;
 use EzEcommerce\Payments\Actions\CapturePayment;
 use EzEcommerce\Payments\Actions\RetryPaymentSession;
 use EzEcommerce\Payments\Models\Payment;
-use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Refunds\Models\Refund;
 use Illuminate\Http\JsonResponse;
@@ -35,7 +34,8 @@ final class OrderController extends Controller
         private readonly RetryPaymentSession $retryPaymentSession,
         private readonly CancelOrder $cancelOrder,
         private readonly CompleteOrder $completeOrder,
-    ) {}
+    ) {
+    }
 
     public function show(Order $order): OrderResource
     {
@@ -106,12 +106,8 @@ final class OrderController extends Controller
     public function capture(Order $order): OrderResource
     {
         $payment = $order->payments()->latest()->firstOrFail();
-        $attempt = PaymentAttempt::query()
-            ->where('payment_id', $payment->id)
-            ->latest()
-            ->firstOrFail();
 
-        $this->capturePayment->execute($payment, $attempt);
+        $this->capturePayment->executeForPayment($payment);
 
         $order->refresh()->load('items', 'payments');
 
@@ -175,12 +171,7 @@ final class OrderController extends Controller
         /** @var Payment $payment */
         $payment = $order->payments()->latest()->firstOrFail();
 
-        $attempt = PaymentAttempt::query()
-            ->where('payment_id', $payment->id)
-            ->latest()
-            ->firstOrFail();
-
-        $result = $this->retryPaymentSession->execute($payment, $attempt, $order);
+        $result = $this->retryPaymentSession->execute($payment, $order);
 
         $payment->refresh();
 

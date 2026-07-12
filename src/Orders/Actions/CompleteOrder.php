@@ -11,7 +11,8 @@ final class CompleteOrder
 {
     public function __construct(
         private readonly RecordOrderTransition $recordOrderTransition,
-    ) {}
+    ) {
+    }
 
     public function execute(Order $order, ?string $reason = null): Order
     {

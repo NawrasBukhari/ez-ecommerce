@@ -13,7 +13,8 @@ final class ReconcileCaptureAttempt
     public function __construct(
         private readonly CapturePayment $capturePayment,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
-    ) {}
+    ) {
+    }
 
     public function confirmProviderSucceeded(
         PaymentAttempt $attempt,

@@ -16,5 +16,6 @@ final readonly class CreatePaymentSessionData
         public Order $order,
         public Money $amount,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 }

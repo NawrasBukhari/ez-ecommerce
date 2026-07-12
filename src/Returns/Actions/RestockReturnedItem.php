@@ -12,7 +12,8 @@ final class RestockReturnedItem
 {
     public function __construct(
         private readonly ReceiveStock $receiveStock,
-    ) {}
+    ) {
+    }
 
     public function execute(ReturnItem $item, Warehouse $warehouse, string $idempotencyKey): ReturnItem
     {

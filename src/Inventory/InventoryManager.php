@@ -13,7 +13,8 @@ final class InventoryManager
     public function __construct(
         private readonly ReceiveStock $receiveStock,
         private readonly ReleaseExpiredReservations $releaseExpiredReservations,
-    ) {}
+    ) {
+    }
 
     public function receiveStock(
         Warehouse $warehouse,

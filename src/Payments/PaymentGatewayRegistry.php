@@ -19,7 +19,8 @@ final class PaymentGatewayRegistry
 
     public function __construct(
         private readonly Application $app,
-    ) {}
+    ) {
+    }
 
     /** @param  class-string<PaymentGateway>  $class */
     public function extend(string $driver, string $class): void

@@ -8,5 +8,6 @@ final readonly class WarehouseAllocation
         public int $warehouseId,
         public int $balanceId,
         public int $quantity,
-    ) {}
+    ) {
+    }
 }

@@ -16,5 +16,6 @@ final readonly class PricingContext
         public ?CustomerGroup $customerGroup = null,
         public ?PriceList $priceList = null,
         public ?DateTimeImmutable $at = null,
-    ) {}
+    ) {
+    }
 }

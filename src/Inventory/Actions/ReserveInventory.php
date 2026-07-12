@@ -23,7 +23,8 @@ final class ReserveInventory
         private readonly InventoryAllocator $allocator,
         private readonly ReservationPolicy $reservationPolicy,
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     /** @return list<InventoryReservation> */
     public function executeForCart(Cart $cart, Order $order, string $paymentMethod): array

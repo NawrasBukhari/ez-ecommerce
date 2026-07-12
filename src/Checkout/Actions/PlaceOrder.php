@@ -45,7 +45,8 @@ final class PlaceOrder
         private readonly CreatePaymentSession $createPaymentSession,
         private readonly CommitReservation $commitReservation,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Cart $cart,
@@ -75,8 +76,8 @@ final class PlaceOrder
         $requestHash = hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
             'customer_identity' => $identity->idempotencyFingerprint(),
-            'shipping_address_id' => $shippingAddress?->id,
-            'billing_address_id' => $billingAddress?->id,
+            'shipping_address' => $this->addressFingerprint($shippingAddress),
+            'billing_address' => $this->addressFingerprint($billingAddress),
             'price_list_id' => $metadata['price_list_id'] ?? null,
             'shipping_method' => $shippingMethod,
             'payment_method' => $paymentMethod,
@@ -315,5 +316,26 @@ final class PlaceOrder
                 )
                 : null,
         );
+    }
+
+    /** @return array<string, mixed>|null */
+    private function addressFingerprint(?Address $address): ?array
+    {
+        if ($address === null) {
+            return null;
+        }
+
+        if (! $address->exists) {
+            return array_filter([
+                'line1' => $address->line1,
+                'line2' => $address->line2,
+                'city' => $address->city,
+                'state' => $address->state,
+                'postal_code' => $address->postal_code,
+                'country_code' => $address->country_code,
+            ], static fn (mixed $value): bool => $value !== null && $value !== '');
+        }
+
+        return ['id' => $address->id];
     }
 }

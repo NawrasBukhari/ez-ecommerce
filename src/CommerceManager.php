@@ -13,7 +13,8 @@ final class CommerceManager
 {
     public function __construct(
         private readonly Application $app,
-    ) {}
+    ) {
+    }
 
     public function cart(): CartManager
     {

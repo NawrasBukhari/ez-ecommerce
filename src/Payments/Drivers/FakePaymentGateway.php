@@ -25,7 +25,8 @@ final class FakePaymentGateway implements PaymentGateway
         private ?GatewayWebhookEvent $webhookEvent = null,
         private bool $sessionThrows = false,
         private bool $captureThrows = false,
-    ) {}
+    ) {
+    }
 
     public function capabilities(): PaymentGatewayCapabilities
     {
@@ -79,8 +80,9 @@ final class FakePaymentGateway implements PaymentGateway
     {
         return $this->webhookEvent ?? new GatewayWebhookEvent(
             eventType: 'payment.captured',
-            externalId: 'fake_event_'.hash('sha256', $data->payload),
-            paymentExternalId: 'fake_payment',
+            eventId: 'fake_event_'.hash('sha256', $data->payload),
+            paymentReference: 'fake_payment',
+            transactionReference: 'fake_txn_'.hash('sha256', $data->payload),
         );
     }
 

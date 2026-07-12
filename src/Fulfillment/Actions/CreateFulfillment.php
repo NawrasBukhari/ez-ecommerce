@@ -15,7 +15,8 @@ final class CreateFulfillment
     public function __construct(
         private readonly FulfillmentReleasePolicy $fulfillmentReleasePolicy,
         private readonly RecalculateOrderFulfillmentStatus $recalculateOrderFulfillmentStatus,
-    ) {}
+    ) {
+    }
 
     public function execute(Order $order, OrderItem $item, int $quantity): Fulfillment
     {

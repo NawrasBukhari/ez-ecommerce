@@ -25,7 +25,8 @@ final class CreateOrderFromCart
         private readonly AllocateLineDiscounts $allocateLineDiscounts,
         private readonly RecordVendorCommissions $recordVendorCommissions,
         private readonly StoreContext $storeContext,
-    ) {}
+    ) {
+    }
 
     public function execute(
         Cart $cart,

@@ -13,7 +13,8 @@ final class ReconcilePaymentFinalization
 {
     public function __construct(
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
-    ) {}
+    ) {
+    }
 
     /** @return Collection<int, Payment> */
     public function pendingPayments(): Collection

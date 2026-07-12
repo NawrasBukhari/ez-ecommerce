@@ -16,7 +16,8 @@ final class AddItemToCart
 {
     public function __construct(
         private readonly PriceResolver $priceResolver,
-    ) {}
+    ) {
+    }
 
     public function execute(Cart $cart, Purchasable $purchasable, int $quantity, ?int $expectedVersion = null): CartItem
     {

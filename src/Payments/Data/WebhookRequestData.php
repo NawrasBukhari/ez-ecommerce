@@ -9,5 +9,6 @@ final readonly class WebhookRequestData
         public string $gateway,
         public string $payload,
         public array $headers = [],
-    ) {}
+    ) {
+    }
 }

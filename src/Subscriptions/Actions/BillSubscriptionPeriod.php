@@ -22,7 +22,8 @@ final class BillSubscriptionPeriod
         private readonly Clock $clock,
         private readonly CreatePaymentSession $createPaymentSession,
         private readonly CapturePayment $capturePayment,
-    ) {}
+    ) {
+    }
 
     public function execute(Subscription $subscription): Order
     {

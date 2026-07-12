@@ -15,7 +15,8 @@ final class ApplyPaymentCapture
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     /**
      * @param  array<string, mixed>  $metadata

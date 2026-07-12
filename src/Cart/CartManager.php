@@ -29,7 +29,8 @@ final class CartManager
         private readonly CalculateCartTotals $calculateCartTotals,
         private readonly MergeCarts $mergeCarts,
         private readonly RemoveDiscountCode $removeDiscountCode,
-    ) {}
+    ) {
+    }
 
     /** @return array{cart: Cart, guest_token: string} */
     public function createGuest(string $currency, ?string $guestToken = null): array

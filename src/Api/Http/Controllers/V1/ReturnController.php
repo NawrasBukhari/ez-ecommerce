@@ -24,7 +24,8 @@ final class ReturnController extends Controller
         private readonly ReceiveReturn $receiveReturn,
         private readonly RestockReturnedItem $restockReturnedItem,
         private readonly MarkReturnedItemAsDamaged $markReturnedItemAsDamaged,
-    ) {}
+    ) {
+    }
 
     public function index(): AnonymousResourceCollection
     {

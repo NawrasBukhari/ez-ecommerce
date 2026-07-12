@@ -12,5 +12,6 @@ final readonly class ShippingRequest
         public ?string $method = null,
         public ?Address $shippingAddress = null,
         public array $lines = [],
-    ) {}
+    ) {
+    }
 }

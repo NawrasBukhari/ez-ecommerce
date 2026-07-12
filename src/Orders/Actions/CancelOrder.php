@@ -17,7 +17,8 @@ final class CancelOrder
     public function __construct(
         private readonly RecordOrderTransition $recordOrderTransition,
         private readonly ReleaseInventoryReservation $releaseInventoryReservation,
-    ) {}
+    ) {
+    }
 
     public function execute(Order $order, ?string $reason = null): Order
     {

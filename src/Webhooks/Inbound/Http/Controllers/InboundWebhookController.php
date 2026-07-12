@@ -17,7 +17,8 @@ final class InboundWebhookController extends Controller
 {
     public function __construct(
         private readonly ReconcilePayment $reconcilePayment,
-    ) {}
+    ) {
+    }
 
     public function __invoke(Request $request, string $gateway): JsonResponse
     {
@@ -35,7 +36,7 @@ final class InboundWebhookController extends Controller
         return response()->json([
             'received' => true,
             'event_type' => $event->eventType,
-            'external_id' => $event->externalId,
+            'external_id' => $event->eventId,
         ]);
     }
 

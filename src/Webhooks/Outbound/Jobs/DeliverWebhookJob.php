@@ -31,7 +31,8 @@ final class DeliverWebhookJob implements ShouldQueue
         public array $payload,
         public ?int $endpointId = null,
         public ?string $secret = null,
-    ) {}
+    ) {
+    }
 
     public function handle(SignWebhookPayload $signWebhookPayload): void
     {

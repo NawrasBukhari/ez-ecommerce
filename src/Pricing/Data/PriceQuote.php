@@ -14,7 +14,8 @@ final readonly class PriceQuote
         public string $source,
         public ?int $priceId = null,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 
     public function fingerprint(): string
     {

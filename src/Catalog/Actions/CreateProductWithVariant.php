@@ -17,7 +17,8 @@ final class CreateProductWithVariant
     public function __construct(
         private readonly CommerceManager $commerce,
         private readonly StoreContext $storeContext,
-    ) {}
+    ) {
+    }
 
     /**
      * @param  array{name: string, slug?: string|null, type?: string, description?: string|null, vendor_id?: string|null, variant: array{sku: string, name: string, price_minor: int, currency?: string}, stock?: int}  $data

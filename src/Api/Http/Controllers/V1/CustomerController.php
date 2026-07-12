@@ -17,7 +17,8 @@ final class CustomerController extends Controller
 {
     public function __construct(
         private readonly CommerceManager $commerce,
-    ) {}
+    ) {
+    }
 
     public function index(): AnonymousResourceCollection
     {

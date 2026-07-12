@@ -10,5 +10,6 @@ final readonly class OrderPaid implements ShouldDispatchAfterCommit
         public int $orderId,
         public string $orderPublicId,
         public int $paymentId,
-    ) {}
+    ) {
+    }
 }

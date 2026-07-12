@@ -20,7 +20,9 @@ final class FinalizeAcceptedPayment
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly ConfirmOrderOnPaymentAccepted $confirmOrderOnPaymentAccepted,
         private readonly CommitReservation $commitReservation,
-    ) {}
+        private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
+    ) {
+    }
 
     /**
      * @param  array<string, mixed>  $metadata
@@ -48,7 +50,14 @@ final class FinalizeAcceptedPayment
         );
 
         $this->recalculateOrderPaymentStatus->execute($payment->order);
-        $this->completeOrderAfterCapture($payment, $wasFullyCaptured);
+
+        try {
+            $this->completeOrderAfterCapture($payment, $wasFullyCaptured);
+        } catch (ReservationExpiredException|InventoryCommitException $e) {
+            $this->recordInventoryFinalizationFailure->execute($payment, $attempt, $e->getMessage());
+
+            throw $e;
+        }
 
         return $payment->fresh();
     }

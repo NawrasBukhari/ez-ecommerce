@@ -10,5 +10,6 @@ final readonly class InventoryContext
     public function __construct(
         public ?Cart $cart = null,
         public ?Order $order = null,
-    ) {}
+    ) {
+    }
 }

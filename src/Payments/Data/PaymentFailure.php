@@ -8,5 +8,6 @@ final readonly class PaymentFailure
         public string $code,
         public string $message,
         public bool $retryable = false,
-    ) {}
+    ) {
+    }
 }

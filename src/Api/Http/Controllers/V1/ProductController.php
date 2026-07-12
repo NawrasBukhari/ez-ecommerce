@@ -19,7 +19,8 @@ final class ProductController extends Controller
     public function __construct(
         private readonly CreateProductWithVariant $createProductWithVariant,
         private readonly StoreContext $storeContext,
-    ) {}
+    ) {
+    }
 
     public function index(Request $request): AnonymousResourceCollection
     {

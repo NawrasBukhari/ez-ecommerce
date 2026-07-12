@@ -7,13 +7,15 @@ use EzEcommerce\Core\Enums\IdempotencyStatus;
 use EzEcommerce\Core\Exceptions\IdempotencyConflictException;
 use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Models\IdempotencyRecord;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
 final class IdempotencyStore
 {
     public function __construct(
         private readonly Clock $clock,
-    ) {}
+    ) {
+    }
 
     /**
      * @param  callable(): array{resource_type: string, resource_id: int, payload: array<string, mixed>}  $operation
@@ -21,52 +23,12 @@ final class IdempotencyStore
      */
     public function execute(string $scope, string $key, string $requestHash, callable $operation): array
     {
-        $early = DB::transaction(function () use ($scope, $key, $requestHash): ?array {
-            $record = IdempotencyRecord::query()
-                ->where('scope', $scope)
-                ->where('key', $key)
-                ->lockForUpdate()
-                ->first();
-
-            if ($record === null) {
-                $record = IdempotencyRecord::query()->create([
-                    'scope' => $scope,
-                    'key' => $key,
-                    'request_hash' => $requestHash,
-                    'status' => IdempotencyStatus::Processing,
-                    'attempts' => 1,
-                    'locked_at' => $this->clock->now(),
-                    'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
-                    'expires_at' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.ttl_minutes', 1440).' minutes'),
-                ]);
-
-                return ['record' => $record, 'result' => null, 'run' => true];
+        $early = DB::transaction(function () use ($scope, $key, $requestHash): array {
+            try {
+                return $this->acquireOrReplay($scope, $key, $requestHash);
+            } catch (UniqueConstraintViolationException) {
+                return $this->acquireOrReplay($scope, $key, $requestHash);
             }
-
-            if ($record->request_hash !== $requestHash) {
-                throw IdempotencyPayloadMismatchException::for($scope, $key);
-            }
-
-            if ($record->status === IdempotencyStatus::Completed) {
-                return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
-            }
-
-            if ($record->status === IdempotencyStatus::FailedTerminal) {
-                return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
-            }
-
-            if ($record->status === IdempotencyStatus::Processing && $record->locked_until > $this->clock->now()) {
-                throw IdempotencyConflictException::for($scope, $key);
-            }
-
-            $record->update([
-                'status' => IdempotencyStatus::Processing,
-                'attempts' => $record->attempts + 1,
-                'locked_at' => $this->clock->now(),
-                'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
-            ]);
-
-            return ['record' => $record->fresh(), 'result' => null, 'run' => true];
         });
 
         if (! $early['run']) {
@@ -105,5 +67,55 @@ final class IdempotencyStore
 
             throw $e;
         }
+    }
+
+    /** @return array{record: IdempotencyRecord, result: array<string, mixed>|null, run: bool} */
+    private function acquireOrReplay(string $scope, string $key, string $requestHash): array
+    {
+        $record = IdempotencyRecord::query()
+            ->where('scope', $scope)
+            ->where('key', $key)
+            ->lockForUpdate()
+            ->first();
+
+        if ($record === null) {
+            $record = IdempotencyRecord::query()->create([
+                'scope' => $scope,
+                'key' => $key,
+                'request_hash' => $requestHash,
+                'status' => IdempotencyStatus::Processing,
+                'attempts' => 1,
+                'locked_at' => $this->clock->now(),
+                'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
+                'expires_at' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.ttl_minutes', 1440).' minutes'),
+            ]);
+
+            return ['record' => $record, 'result' => null, 'run' => true];
+        }
+
+        if ($record->request_hash !== $requestHash) {
+            throw IdempotencyPayloadMismatchException::for($scope, $key);
+        }
+
+        if ($record->status === IdempotencyStatus::Completed) {
+            return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
+        }
+
+        if ($record->status === IdempotencyStatus::FailedTerminal) {
+            return ['record' => $record, 'result' => $record->response_payload, 'run' => false];
+        }
+
+        if ($record->status === IdempotencyStatus::Processing && $record->locked_until > $this->clock->now()) {
+            throw IdempotencyConflictException::for($scope, $key);
+        }
+
+        $record->update([
+            'status' => IdempotencyStatus::Processing,
+            'attempts' => $record->attempts + 1,
+            'locked_at' => $this->clock->now(),
+            'locked_until' => $this->clock->now()->modify('+'.config('ez-ecommerce.idempotency.lock_ttl_seconds', 60).' seconds'),
+        ]);
+
+        return ['record' => $record->fresh(), 'result' => null, 'run' => true];
     }
 }

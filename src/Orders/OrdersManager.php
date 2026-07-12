@@ -11,7 +11,8 @@ final class OrdersManager
     public function __construct(
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly RecalculateOrderFulfillmentStatus $recalculateOrderFulfillmentStatus,
-    ) {}
+    ) {
+    }
 
     public function findByPublicId(string $publicId): ?Order
     {

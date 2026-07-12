@@ -6,6 +6,16 @@ use EzEcommerce\Core\Models\CommerceModel;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int|null $customer_id
+ * @property string|null $type
+ * @property string|null $line1
+ * @property string|null $line2
+ * @property string|null $city
+ * @property string|null $state
+ * @property string|null $postal_code
+ * @property string|null $country_code
+ */
 class Address extends CommerceModel
 {
     protected static bool $usesPublicId = true;

@@ -14,7 +14,8 @@ final class RenewSubscription
     public function __construct(
         private readonly Clock $clock,
         private readonly BillSubscriptionPeriod $billSubscriptionPeriod,
-    ) {}
+    ) {
+    }
 
     public function execute(Subscription $subscription): Subscription
     {

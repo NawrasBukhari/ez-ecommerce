@@ -17,7 +17,8 @@ final class ReleaseExpiredReservations
     public function __construct(
         private readonly Clock $clock,
         private readonly ReleaseInventoryReservation $releaseInventoryReservation,
-    ) {}
+    ) {
+    }
 
     public function execute(): int
     {

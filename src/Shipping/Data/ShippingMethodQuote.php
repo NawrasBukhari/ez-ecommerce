@@ -10,5 +10,6 @@ final readonly class ShippingMethodQuote
         public string $method,
         public string $label,
         public Money $amount,
-    ) {}
+    ) {
+    }
 }

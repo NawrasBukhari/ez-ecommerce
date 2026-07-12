@@ -10,7 +10,8 @@ final class DefaultStoreContext implements StoreContext
 {
     public function __construct(
         private readonly Request $request,
-    ) {}
+    ) {
+    }
 
     public function current(): ?Store
     {

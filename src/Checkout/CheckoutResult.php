@@ -16,7 +16,8 @@ final readonly class CheckoutResult
         public ?PaymentSessionResult $paymentSession,
         public CheckoutStatus $status,
         public ?PaymentFailure $paymentFailure = null,
-    ) {}
+    ) {
+    }
 
     public function requiresCustomerAction(): bool
     {

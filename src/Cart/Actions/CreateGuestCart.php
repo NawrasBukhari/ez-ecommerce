@@ -12,7 +12,8 @@ final class CreateGuestCart
     public function __construct(
         private readonly Clock $clock,
         private readonly StoreContext $storeContext,
-    ) {}
+    ) {
+    }
 
     /** @return array{cart: Cart, guest_token: string} */
     public function execute(string $currency, ?string $guestToken = null): array

@@ -22,7 +22,8 @@ final class CheckoutBuilder
     public function __construct(
         private readonly Cart $cart,
         private readonly PlaceOrder $placeOrder,
-    ) {}
+    ) {
+    }
 
     public function shippingAddress(?Address $address): self
     {

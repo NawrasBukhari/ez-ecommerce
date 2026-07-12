@@ -137,11 +137,18 @@ final class PayPalPaymentGateway implements PaymentGateway
     {
         $payload = json_decode($data->payload, true, 512, JSON_THROW_ON_ERROR);
         $resource = $payload['resource'] ?? [];
+        $eventType = $payload['event_type'] ?? 'unknown';
 
-        $paymentExternalId = $resource['id']
-            ?? $resource['supplementary_data']['related_ids']['order_id']
+        $paymentReference = $resource['supplementary_data']['related_ids']['order_id']
+            ?? $resource['purchase_units'][0]['reference_id']
             ?? $payload['resource']['purchase_units'][0]['reference_id']
             ?? null;
+
+        if ($eventType === 'PAYMENT.CAPTURE.COMPLETED' || $eventType === 'PAYMENT.SALE.COMPLETED') {
+            $transactionReference = $resource['id'] ?? null;
+        } else {
+            $transactionReference = null;
+        }
 
         $amountMinor = null;
         $currency = null;
@@ -151,9 +158,10 @@ final class PayPalPaymentGateway implements PaymentGateway
         }
 
         return new GatewayWebhookEvent(
-            eventType: $payload['event_type'] ?? 'unknown',
-            externalId: $payload['id'] ?? hash('sha256', $data->payload),
-            paymentExternalId: $paymentExternalId,
+            eventType: $eventType,
+            eventId: $payload['id'] ?? hash('sha256', $data->payload),
+            paymentReference: is_string($paymentReference) ? $paymentReference : null,
+            transactionReference: is_string($transactionReference) ? $transactionReference : null,
             amountMinor: $amountMinor,
             currency: $currency,
         );

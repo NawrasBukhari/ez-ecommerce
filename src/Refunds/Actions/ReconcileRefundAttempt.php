@@ -13,7 +13,8 @@ final class ReconcileRefundAttempt
 {
     public function __construct(
         private readonly RefundPayment $refundPayment,
-    ) {}
+    ) {
+    }
 
     public function confirmProviderSucceeded(PaymentAttempt $attempt, string $externalId): Refund
     {

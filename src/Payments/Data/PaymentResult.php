@@ -15,5 +15,6 @@ final readonly class PaymentResult
         public ?string $externalId = null,
         public ?PaymentFailure $failure = null,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 }

@@ -10,5 +10,6 @@ final readonly class CartItemAdded implements ShouldDispatchAfterCommit
         public int $cartId,
         public int $cartItemId,
         public string $purchasableType,
-    ) {}
+    ) {
+    }
 }

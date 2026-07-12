@@ -25,15 +25,10 @@ final class DefaultFulfillmentReleasePolicy implements FulfillmentReleasePolicy
         if ($order->payment_method === 'manual') {
             return in_array($order->payment_status, [
                 OrderPaymentStatus::Paid,
-                OrderPaymentStatus::PartiallyPaid,
                 OrderPaymentStatus::Authorized,
             ], true);
         }
 
-        return $order->payments->contains(fn ($p) => in_array($p->status, [
-            PaymentStatus::Captured,
-            PaymentStatus::PartiallyCaptured,
-            PaymentStatus::Authorized,
-        ], true));
+        return $order->payments->contains(fn ($payment) => $payment->status === PaymentStatus::Captured);
     }
 }

@@ -25,7 +25,8 @@ final class InventoryController extends Controller
         private readonly ReleaseInventoryReservation $releaseInventoryReservation,
         private readonly TransferStock $transferStock,
         private readonly AdjustStock $adjustStock,
-    ) {}
+    ) {
+    }
 
     public function indexWarehouses(): AnonymousResourceCollection
     {

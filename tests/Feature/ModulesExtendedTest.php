@@ -39,8 +39,9 @@ it('reconciles fake gateway webhook', function () {
     $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
         webhookEvent: new GatewayWebhookEvent(
             eventType: 'payment_intent.succeeded',
-            externalId: 'evt_test_1',
-            paymentExternalId: 'manual_attempt',
+            eventId: 'evt_test_1',
+            paymentReference: 'manual_attempt',
+            transactionReference: 'txn_test_1',
         ),
     ));
 

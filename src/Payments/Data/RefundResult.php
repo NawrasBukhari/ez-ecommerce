@@ -15,5 +15,6 @@ final readonly class RefundResult
         public ?string $externalId = null,
         public ?PaymentFailure $failure = null,
         public array $metadata = [],
-    ) {}
+    ) {
+    }
 }
