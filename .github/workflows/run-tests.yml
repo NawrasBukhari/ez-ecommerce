@@ -1,0 +1,60 @@
+name: run-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sqlite:
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} (SQLite)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: "8.2"
+            laravel: "11.*"
+          - php: "8.3"
+            laravel: "11.*"
+          - php: "8.3"
+            laravel: "12.*"
+          - php: "8.4"
+            laravel: "12.*"
+          - php: "8.3"
+            laravel: "13.*"
+          - php: "8.4"
+            laravel: "13.*"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+          coverage: none
+      - name: Require Laravel ${{ matrix.laravel }}
+        run: |
+          composer require "illuminate/contracts:${{ matrix.laravel }}" "illuminate/database:${{ matrix.laravel }}" "illuminate/events:${{ matrix.laravel }}" "illuminate/support:${{ matrix.laravel }}" --no-update
+          composer require "orchestra/testbench:${{ matrix.laravel == '11.*' && '^9.0' || (matrix.laravel == '12.*' && '^10.0' || '^11.0') }}" --dev --no-update
+      - run: composer update --prefer-stable --prefer-lowest --no-interaction
+      - run: vendor/bin/pest
+
+  mysql-hardening:
+    name: Hardening (MySQL)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: testing
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, mysql, pdo_mysql
+      - run: composer install --prefer-stable --no-interaction
+      - run: vendor/bin/pest --group=hardening
