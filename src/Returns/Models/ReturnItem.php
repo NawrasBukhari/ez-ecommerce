@@ -6,6 +6,9 @@ use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Orders\Models\OrderItem;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property-read OrderItem|null $orderItem
+ */
 class ReturnItem extends CommerceModel
 {
     protected $table = 'commerce_return_items';

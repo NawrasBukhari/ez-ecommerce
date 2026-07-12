@@ -6,6 +6,12 @@ use EzEcommerce\Core\Models\CommerceModel;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string|null $url
+ * @property string|null $secret
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $events
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ */
 class WebhookEndpoint extends CommerceModel
 {
     protected $table = 'commerce_webhook_endpoints';

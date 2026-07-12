@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
+/**
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ */
 class Price extends CommerceModel
 {
     protected $table = 'commerce_prices';

@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $product_snapshot
+ */
 class OrderItem extends CommerceModel
 {
     protected $table = 'commerce_order_items';

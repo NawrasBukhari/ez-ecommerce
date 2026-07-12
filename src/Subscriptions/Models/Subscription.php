@@ -9,6 +9,10 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string|null $public_id
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ */
 class Subscription extends CommerceModel
 {
     protected static bool $usesPublicId = true;

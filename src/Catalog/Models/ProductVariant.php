@@ -16,6 +16,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * @property string|null $public_id
+ * @property string|null $sku
+ * @property string|null $name
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ * @property-read Product|null $product
+ */
 class ProductVariant extends CommerceModel implements Purchasable, Shippable, Stockable, Taxable
 {
     protected static bool $usesPublicId = true;
@@ -41,6 +48,7 @@ class ProductVariant extends CommerceModel implements Purchasable, Shippable, St
         ];
     }
 
+    /** @return BelongsTo<Product, $this> */
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
@@ -93,14 +101,14 @@ class ProductVariant extends CommerceModel implements Purchasable, Shippable, St
 
     public function weightGrams(): ?int
     {
-        $weight = $this->metadata?->get('weight_grams');
+        $weight = $this->metadata['weight_grams'] ?? null;
 
         return is_int($weight) ? $weight : null;
     }
 
     public function taxCategory(): ?string
     {
-        $category = $this->metadata?->get('tax_category');
+        $category = $this->metadata['tax_category'] ?? null;
 
         return is_string($category) ? $category : null;
     }

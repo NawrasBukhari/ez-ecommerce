@@ -4,6 +4,8 @@ parameters:
         - src
     excludePaths:
         - src/Api
+    stubFiles:
+        - stubs/stripe-php.stub
 
 includes:
     - phpstan-baseline.neon

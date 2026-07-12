@@ -1,0 +1,35 @@
+<?php
+
+namespace Stripe;
+
+class StripeClient
+{
+    public PaymentIntentService $paymentIntents;
+
+    public RefundService $refunds;
+
+    public function __construct(string $apiKey)
+    {
+    }
+}
+
+class PaymentIntentService
+{
+    /** @param  array<string, mixed>  $params */
+    public function create(array $params): object
+    {
+    }
+
+    /** @param  array<string, mixed>  $params */
+    public function capture(string $id, array $params = []): object
+    {
+    }
+}
+
+class RefundService
+{
+    /** @param  array<string, mixed>  $params */
+    public function create(array $params): object
+    {
+    }
+}

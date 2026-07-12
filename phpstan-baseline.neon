@@ -289,12 +289,6 @@ parameters:
 			path: src/Cart/Exceptions/CartVersionConflictException.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Catalog\\Models\\ProductVariant\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Catalog/Actions/CreateProductWithVariant.php
-
-		-
 			message: '#^Offset ''category_ids'' does not exist on array\{name\: string, slug\?\: string\|null, type\?\: string, description\?\: string\|null, vendor_id\?\: string\|null, variant\: array\{sku\: string, name\: string, price_minor\: int, currency\?\: string\}, stock\?\: int\}\.$#'
 			identifier: offsetAccess.notFound
 			count: 1
@@ -317,36 +311,6 @@ parameters:
 			identifier: empty.offset
 			count: 1
 			path: src/Catalog/Actions/CreateProductWithVariant.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Catalog\\Models\\ProductVariant\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Catalog/Models/ProductVariant.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Catalog\\Models\\ProductVariant\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Catalog/Models/ProductVariant.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$name\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Catalog/Models/ProductVariant.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$type\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Catalog/Models/ProductVariant.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$vendor_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Catalog/Models/ProductVariant.php
 
 		-
 			message: '#^Using nullsafe property access "\?\-\>name" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
@@ -818,12 +782,6 @@ parameters:
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$tax_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Catalog\\Models\\ProductVariant\:\:\$sku\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Orders/Actions/CreateOrderFromCart.php
@@ -1405,12 +1363,6 @@ parameters:
 			path: src/Subscriptions/Actions/BillSubscriptionPeriod.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Subscriptions\\Models\\Subscription\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Subscriptions/Actions/BillSubscriptionPeriod.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$amount_minor\.$#'
 			identifier: property.notFound
 			count: 1
@@ -1448,12 +1400,6 @@ parameters:
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Subscriptions\\Models\\Subscription\:\:\$current_period_end\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Subscriptions/Actions/RenewSubscription.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Subscriptions\\Models\\Subscription\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Subscriptions/Actions/RenewSubscription.php
@@ -1499,15 +1445,3 @@ parameters:
 			identifier: argument.type
 			count: 1
 			path: src/Webhooks/Inbound/Http/Controllers/InboundWebhookController.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Webhooks\\Outbound\\Models\\WebhookEndpoint\:\:\$secret\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Webhooks/Outbound/Actions/DispatchWebhook.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Webhooks\\Outbound\\Models\\WebhookEndpoint\:\:\$url\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Webhooks/Outbound/Actions/DispatchWebhook.php

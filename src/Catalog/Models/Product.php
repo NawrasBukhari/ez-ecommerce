@@ -12,6 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * @property string|null $public_id
+ * @property string|null $name
+ * @property string|null $type
+ * @property int|null $vendor_id
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ */
 class Product extends CommerceModel
 {
     protected static bool $usesPublicId = true;
