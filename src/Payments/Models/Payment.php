@@ -6,10 +6,20 @@ use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Refunds\Models\Refund;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property PaymentStatus $status
+ * @property string $gateway
+ * @property string $currency
+ * @property int $amount_minor
+ * @property int $captured_minor
+ * @property int $refunded_minor
+ * @property ArrayObject<int|string, mixed>|null $metadata
+ */
 class Payment extends CommerceModel
 {
     protected static bool $usesPublicId = true;

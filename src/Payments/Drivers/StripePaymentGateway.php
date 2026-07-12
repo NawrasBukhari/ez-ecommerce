@@ -69,7 +69,7 @@ final class StripePaymentGateway implements PaymentGateway
 
     public function capture(CapturePaymentData $data): PaymentResult
     {
-        $intentId = $data->attempt->external_id ?? $data->payment->metadata?->get('stripe_payment_intent_id');
+        $intentId = $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
         if ($intentId === null) {
             throw PaymentOperationNotSupported::for('stripe', 'capture without payment_intent');
         }
@@ -92,7 +92,7 @@ final class StripePaymentGateway implements PaymentGateway
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $intentId = $data->attempt->external_id ?? $data->payment->metadata?->get('stripe_payment_intent_id');
+        $intentId = $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
         if ($intentId === null) {
             throw PaymentOperationNotSupported::for('stripe', 'refund without payment_intent');
         }

@@ -105,7 +105,7 @@ final class PayPalPaymentGateway implements PaymentGateway
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $captureId = $data->attempt->external_id ?? $data->payment->metadata?->get('paypal_capture_id');
+        $captureId = $data->attempt->external_id ?? ($data->payment->metadata['paypal_capture_id'] ?? null);
         if ($captureId === null) {
             throw PaymentOperationNotSupported::for('paypal', 'refund without capture id');
         }

@@ -7,10 +7,19 @@ use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 /**
+ * @property int $id
+ * @property int $payment_id
+ * @property string $operation
+ * @property string|null $idempotency_key
+ * @property string $status
+ * @property string|null $error_code
  * @property ArrayObject<int|string, mixed>|null $request_metadata
  * @property ArrayObject<int|string, mixed>|null $response_metadata
+ * @property Carbon|null $updated_at
+ * @property-read Payment|null $payment
  */
 class PaymentAttempt extends CommerceModel
 {

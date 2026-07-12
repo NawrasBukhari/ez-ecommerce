@@ -62,9 +62,7 @@ class ReconcileRefundsCommand extends Command
         }
 
         if ($this->option('mark-failed')) {
-            $refundId = $attempt->request_metadata instanceof \ArrayObject
-                ? $attempt->request_metadata['refund_id'] ?? null
-                : ($attempt->request_metadata['refund_id'] ?? null);
+            $refundId = $this->refundIdFromAttempt($attempt);
 
             if ($refundId !== null) {
                 Refund::query()->whereKey((int) $refundId)->update(['status' => 'failed']);
@@ -86,5 +84,15 @@ class ReconcileRefundsCommand extends Command
         $this->components->warn('Specify --retry, --mark-succeeded, or --mark-failed.');
 
         return self::INVALID;
+    }
+
+    private function refundIdFromAttempt(PaymentAttempt $attempt): ?int
+    {
+        $metadata = $attempt->request_metadata instanceof \ArrayObject
+            ? $attempt->request_metadata->getArrayCopy()
+            : (array) ($attempt->request_metadata ?? []);
+        $refundId = $metadata['refund_id'] ?? null;
+
+        return $refundId === null ? null : (int) $refundId;
     }
 }

@@ -451,12 +451,6 @@ parameters:
 			path: src/Inventory/Actions/ReleaseExpiredReservations.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseExpiredReservations.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\:\:\$reserved\.$#'
 			identifier: property.notFound
 			count: 1
@@ -847,76 +841,10 @@ parameters:
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/ApplyPaymentCapture.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$captured_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ApplyPaymentCapture.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ApplyPaymentCapture.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/CapturePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$captured_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/CapturePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/CapturePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$gateway\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/CapturePayment.php
-
-		-
 			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\RecalculateOrderPaymentStatus\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
 			identifier: argument.type
 			count: 1
 			path: src/Payments/Actions/CapturePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/CreatePaymentSession.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/CreatePaymentSession.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$gateway\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/CreatePaymentSession.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
 
 		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
@@ -949,32 +877,14 @@ parameters:
 			path: src/Payments/Actions/FinalizeAcceptedPayment.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$captured_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Webhooks\\Inbound\\Models\\ProcessedGatewayEvent\:\:\$status\.$#'
 			identifier: property.notFound
 			count: 2
 			path: src/Payments/Actions/ReconcilePayment.php
 
 		-
-			message: '#^Method EzEcommerce\\Payments\\Actions\\ReconcilePayment\:\:findPayment\(\) should return EzEcommerce\\Payments\\Models\\Payment\|null but returns Illuminate\\Database\\Eloquent\\Model\|null\.$#'
-			identifier: return.type
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$metadata\.$#'
+			identifier: property.notFound
 			count: 1
 			path: src/Payments/Actions/ReconcilePayment.php
 
@@ -983,24 +893,6 @@ parameters:
 			identifier: argument.type
 			count: 1
 			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/RetryPaymentSession.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/RetryPaymentSession.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$gateway\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/RetryPaymentSession.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
@@ -1021,12 +913,6 @@ parameters:
 			path: src/Payments/Drivers/NullPaymentGateway.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Drivers/PayPalPaymentGateway.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
@@ -1045,12 +931,6 @@ parameters:
 			path: src/Payments/Drivers/StripePaymentGateway.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Drivers/StripePaymentGateway.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
@@ -1066,12 +946,6 @@ parameters:
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 2
-			path: src/Payments/Drivers/TelrPaymentGateway.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 1
 			path: src/Payments/Drivers/TelrPaymentGateway.php
 
 		-
@@ -1093,43 +967,7 @@ parameters:
 			path: src/Pricing/DefaultPriceResolver.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$captured_minor\.$#'
-			identifier: property.notFound
-			count: 3
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$gateway\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$order_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$refunded_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Refunds\\Models\\Refund\:\:\$amount_minor\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Refunds/Actions/RefundPayment.php
@@ -1143,12 +981,6 @@ parameters:
 		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$public_id\.$#'
 			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Offset ''refund_id'' on null on left side of \?\? does not exist\.$#'
-			identifier: nullCoalesce.offset
 			count: 1
 			path: src/Refunds/Actions/RefundPayment.php
 

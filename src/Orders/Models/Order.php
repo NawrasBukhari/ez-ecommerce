@@ -11,10 +11,14 @@ use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Payments\Models\Payment;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property ArrayObject<int|string, mixed>|null $metadata
+ */
 class Order extends CommerceModel
 {
     protected static bool $usesPublicId = true;

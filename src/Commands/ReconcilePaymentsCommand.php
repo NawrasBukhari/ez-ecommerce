@@ -47,7 +47,7 @@ class ReconcilePaymentsCommand extends Command
             return self::SUCCESS;
         }
 
-        $attempt = PaymentAttempt::query()->findOrFail((int) $this->argument('attempt'));
+        $attempt = PaymentAttempt::query()->with('payment')->findOrFail((int) $this->argument('attempt'));
 
         if ($attempt->operation !== 'capture' || $attempt->status !== 'unknown') {
             throw new RuntimeException('Attempt is not an unknown capture.');
@@ -68,7 +68,12 @@ class ReconcilePaymentsCommand extends Command
         }
 
         if ($this->option('retry')) {
-            $capturePayment->execute($attempt->payment, $attempt);
+            $payment = $attempt->payment;
+            if ($payment === null) {
+                throw new RuntimeException("Capture attempt [{$attempt->id}] is missing its payment.");
+            }
+
+            $capturePayment->execute($payment, $attempt);
             $this->components->info("Capture attempt [{$attempt->id}] retried.");
 
             return self::SUCCESS;

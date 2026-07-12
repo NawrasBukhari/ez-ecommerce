@@ -56,17 +56,14 @@ final class RefundPayment
                 ->first();
 
             if ($existingAttempt !== null) {
-                $storedHash = $existingAttempt->request_metadata instanceof \ArrayObject
-                    ? $existingAttempt->request_metadata['payload_hash'] ?? null
-                    : ($existingAttempt->request_metadata['payload_hash'] ?? null);
+                $metadata = $this->requestMetadata($existingAttempt);
+                $storedHash = $metadata['payload_hash'] ?? null;
 
                 if ($storedHash !== null && $storedHash !== $payloadHash) {
                     throw IdempotencyPayloadMismatchException::for('refund', $idempotencyKey);
                 }
 
-                $refundId = $existingAttempt->request_metadata instanceof \ArrayObject
-                    ? $existingAttempt->request_metadata['refund_id'] ?? null
-                    : ($existingAttempt->request_metadata['refund_id'] ?? null);
+                $refundId = $metadata['refund_id'] ?? null;
 
                 if ($refundId !== null) {
                     $refund = Refund::query()->find((int) $refundId);
@@ -237,16 +234,18 @@ final class RefundPayment
             throw new RuntimeException('Refund attempt is not in unknown state.');
         }
 
-        $refundId = $attempt->request_metadata instanceof \ArrayObject
-            ? $attempt->request_metadata['refund_id'] ?? null
-            : ($attempt->request_metadata['refund_id'] ?? null);
+        $refundId = $this->requestMetadata($attempt)['refund_id'] ?? null;
 
         if ($refundId === null) {
             throw new RuntimeException('Unknown refund attempt is missing refund_id metadata.');
         }
 
         $refund = Refund::query()->findOrFail((int) $refundId);
+        $attempt->loadMissing('payment');
         $payment = $attempt->payment;
+        if ($payment === null) {
+            throw new RuntimeException("Refund attempt [{$attempt->id}] is missing its payment.");
+        }
         $amount = Money::fromMinor($refund->amount_minor, $refund->currency);
 
         $attempt->update(['status' => 'pending']);
@@ -278,5 +277,13 @@ final class RefundPayment
             'currency' => $amount->currency,
             'reason' => $reason,
         ]));
+    }
+
+    /** @return array<string, mixed> */
+    private function requestMetadata(PaymentAttempt $attempt): array
+    {
+        return $attempt->request_metadata instanceof \ArrayObject
+            ? $attempt->request_metadata->getArrayCopy()
+            : (array) ($attempt->request_metadata ?? []);
     }
 }
