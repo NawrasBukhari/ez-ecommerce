@@ -9,7 +9,6 @@ use EzEcommerce\Checkout\CheckoutResult;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Core\Enums\CheckoutStatus;
 use EzEcommerce\Core\Enums\PaymentStatus;
-use EzEcommerce\Core\Events\OrderPaid;
 use EzEcommerce\Core\Events\OrderPlaced;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Support\CanonicalJson;
@@ -17,11 +16,9 @@ use EzEcommerce\Customers\Contracts\CustomerResolver;
 use EzEcommerce\Customers\Data\CustomerIdentity;
 use EzEcommerce\Customers\Data\CustomerResolutionContext;
 use EzEcommerce\Customers\Models\Address;
-use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Actions\ReserveInventory;
 use EzEcommerce\Inventory\Contracts\ReservationPolicy;
-use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\CreateOrderFromCart;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Orders\Models\Order;
@@ -45,7 +42,6 @@ final class PlaceOrder
         private readonly CreatePaymentSession $createPaymentSession,
         private readonly CommitReservation $commitReservation,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-        private readonly ConfirmOrderOnPaymentAccepted $confirmOrderOnPaymentAccepted,
     ) {}
 
     public function execute(
@@ -68,10 +64,6 @@ final class PlaceOrder
 
         $cart = Cart::query()->findOrFail($cart->id);
         $identity = $customerIdentity ?? new CustomerIdentity;
-        $customer = $this->customerResolver->resolve($identity, new CustomerResolutionContext(cart: $cart));
-        if ($customer === null) {
-            throw new RuntimeException('Customer could not be resolved.');
-        }
 
         $metadata = $cart->metadata instanceof \ArrayObject
             ? $cart->metadata->getArrayCopy()
@@ -79,7 +71,7 @@ final class PlaceOrder
 
         $requestHash = hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
-            'customer_id' => $customer->id,
+            'customer_identity' => $identity->idempotencyFingerprint(),
             'shipping_address_id' => $shippingAddress?->id,
             'billing_address_id' => $billingAddress?->id,
             'price_list_id' => $metadata['price_list_id'] ?? null,
@@ -94,7 +86,7 @@ final class PlaceOrder
             $requestHash,
             fn () => $this->placeWithinTransaction(
                 $cart,
-                $customer,
+                $identity,
                 $shippingAddress,
                 $billingAddress,
                 $shippingMethod,
@@ -113,7 +105,7 @@ final class PlaceOrder
     /** @return array{resource_type: string, resource_id: int, payload: array<string, mixed>} */
     private function placeWithinTransaction(
         Cart $cart,
-        Customer $customer,
+        CustomerIdentity $customerIdentity,
         ?Address $shippingAddress,
         ?Address $billingAddress,
         ?string $shippingMethod,
@@ -122,7 +114,7 @@ final class PlaceOrder
     ): array {
         $commercial = DB::transaction(function () use (
             $cart,
-            $customer,
+            $customerIdentity,
             $shippingAddress,
             $billingAddress,
             $shippingMethod,
@@ -133,6 +125,14 @@ final class PlaceOrder
 
             if ($cart->status !== CartStatus::Active) {
                 throw new RuntimeException('Cart is not active.');
+            }
+
+            $customer = $this->customerResolver->resolve(
+                $customerIdentity,
+                new CustomerResolutionContext(cart: $cart),
+            );
+            if ($customer === null) {
+                throw new RuntimeException('Customer could not be resolved.');
             }
 
             if ($cart->customer_id !== $customer->id) {
@@ -198,9 +198,6 @@ final class PlaceOrder
             } elseif ($sessionResult->status === PaymentStatus::RequiresAction) {
                 $status = CheckoutStatus::RequiresAction;
             } elseif ($sessionResult->status === PaymentStatus::Captured) {
-                $this->commitReservation->executeForOrder($commercial['order']);
-                $this->confirmOrderOnPaymentAccepted->execute($commercial['order']);
-                Event::dispatch(new OrderPaid($commercial['order']->id, $commercial['order']->public_id, $commercial['payment']->id));
                 $status = CheckoutStatus::Completed;
             } elseif ($this->reservationPolicy->shouldCommitImmediately($commercial['order'], $paymentMethod)) {
                 $this->commitReservation->executeForOrder($commercial['order']);
@@ -211,8 +208,8 @@ final class PlaceOrder
                 'error_code' => 'session_exception',
                 'error_message' => $e->getMessage(),
             ]);
-
-            throw $e;
+            $paymentFailure = new PaymentFailure('session_exception', $e->getMessage(), true);
+            $status = CheckoutStatus::PaymentSessionFailed;
         }
 
         $this->recalculateOrderPaymentStatus->execute($commercial['order']);

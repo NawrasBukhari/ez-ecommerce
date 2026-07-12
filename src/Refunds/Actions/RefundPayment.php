@@ -50,14 +50,14 @@ final class RefundPayment
                 ->first();
 
             if ($existingAttempt !== null) {
-                $refund = Refund::query()
-                    ->where('payment_id', $payment->id)
-                    ->where('id', '>=', 1)
-                    ->latest()
-                    ->first();
+                if ($existingAttempt->status === 'succeeded') {
+                    $refundId = $existingAttempt->request_metadata instanceof \ArrayObject
+                        ? $existingAttempt->request_metadata['refund_id'] ?? null
+                        : ($existingAttempt->request_metadata['refund_id'] ?? null);
 
-                if ($refund !== null && $existingAttempt->status === 'succeeded') {
-                    return $refund;
+                    if ($refundId !== null) {
+                        return Refund::query()->findOrFail((int) $refundId);
+                    }
                 }
             }
         }
@@ -84,6 +84,7 @@ final class RefundPayment
                 'operation' => 'refund',
                 'idempotency_key' => $idempotencyKey !== '' ? $idempotencyKey : $refund->public_id,
                 'status' => 'pending',
+                'request_metadata' => ['refund_id' => $refund->id],
             ]);
 
             return ['refund' => $refund, 'attempt' => $attempt, 'payment' => $locked];
@@ -103,6 +104,19 @@ final class RefundPayment
                     'status' => 'failed',
                     'error_code' => $result->failure?->code,
                     'error_message' => $result->failure?->message,
+                ]);
+                $this->recalculateOrderPaymentStatus->execute($locked->order);
+
+                return $refund->fresh();
+            }
+
+            $refundable = $locked->captured_minor - $locked->refunded_minor;
+            if ($result->amount->minorAmount > $refundable) {
+                $refund->update(['status' => RefundStatus::Failed]);
+                $attempt->update([
+                    'status' => 'failed',
+                    'error_code' => 'refund_exceeds_balance',
+                    'error_message' => "Refund amount [{$result->amount->minorAmount}] exceeds refundable [{$refundable}].",
                 ]);
                 $this->recalculateOrderPaymentStatus->execute($locked->order);
 

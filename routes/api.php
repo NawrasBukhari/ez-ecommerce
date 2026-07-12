@@ -104,7 +104,9 @@ Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
             Route::post('orders/{order}/cancel', [OrderController::class, 'cancel']);
             Route::post('orders/{order}/complete', [OrderController::class, 'complete']);
             Route::post('orders/{order}/returns', [ReturnController::class, 'store']);
-            Route::post('webhook-deliveries/{webhookDelivery}/retry', [WebhookDeliveryController::class, 'retry']);
+            if (config('ez-ecommerce.features.outbound_webhooks', false)) {
+                Route::post('webhook-deliveries/{webhookDelivery}/retry', [WebhookDeliveryController::class, 'retry']);
+            }
         });
 
         Route::middleware('commerce.api:returns.read')->group(function (): void {
@@ -118,46 +120,54 @@ Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
             Route::post('returns/{return}/items/{returnItem}/mark-damaged', [ReturnController::class, 'markItemDamaged']);
         });
 
-        Route::middleware('commerce.api:stores.read')->group(function (): void {
-            Route::get('stores', [StoreController::class, 'index']);
-            Route::get('stores/{store}', [StoreController::class, 'show']);
-        });
+        if (config('ez-ecommerce.features.multi_store', false)) {
+            Route::middleware('commerce.api:stores.read')->group(function (): void {
+                Route::get('stores', [StoreController::class, 'index']);
+                Route::get('stores/{store}', [StoreController::class, 'show']);
+            });
 
-        Route::middleware('commerce.api:stores.write')->group(function (): void {
-            Route::post('stores', [StoreController::class, 'store']);
-        });
+            Route::middleware('commerce.api:stores.write')->group(function (): void {
+                Route::post('stores', [StoreController::class, 'store']);
+            });
+        }
 
-        Route::middleware('commerce.api:companies.read')->group(function (): void {
-            Route::get('companies', [CompanyController::class, 'index']);
-            Route::get('companies/{company}', [CompanyController::class, 'show']);
-        });
+        if (config('ez-ecommerce.features.b2b', false)) {
+            Route::middleware('commerce.api:companies.read')->group(function (): void {
+                Route::get('companies', [CompanyController::class, 'index']);
+                Route::get('companies/{company}', [CompanyController::class, 'show']);
+            });
 
-        Route::middleware('commerce.api:companies.write')->group(function (): void {
-            Route::post('companies', [CompanyController::class, 'store']);
-        });
+            Route::middleware('commerce.api:companies.write')->group(function (): void {
+                Route::post('companies', [CompanyController::class, 'store']);
+            });
+        }
 
-        Route::middleware('commerce.api:marketplace.read')->group(function (): void {
-            Route::get('vendors', [VendorController::class, 'index']);
-            Route::get('vendors/{vendor}', [VendorController::class, 'show']);
-            Route::get('vendors/{vendor}/commissions', [VendorController::class, 'commissions']);
-            Route::get('vendors/{vendor}/payouts', [VendorController::class, 'payouts']);
-            Route::get('vendors/{vendor}/payouts/{payout}', [VendorController::class, 'showPayout']);
-        });
+        if (config('ez-ecommerce.features.marketplace', false)) {
+            Route::middleware('commerce.api:marketplace.read')->group(function (): void {
+                Route::get('vendors', [VendorController::class, 'index']);
+                Route::get('vendors/{vendor}', [VendorController::class, 'show']);
+                Route::get('vendors/{vendor}/commissions', [VendorController::class, 'commissions']);
+                Route::get('vendors/{vendor}/payouts', [VendorController::class, 'payouts']);
+                Route::get('vendors/{vendor}/payouts/{payout}', [VendorController::class, 'showPayout']);
+            });
 
-        Route::middleware('commerce.api:marketplace.write')->group(function (): void {
-            Route::post('vendors', [VendorController::class, 'store']);
-            Route::post('vendors/{vendor}/payouts', [VendorController::class, 'payout']);
-        });
+            Route::middleware('commerce.api:marketplace.write')->group(function (): void {
+                Route::post('vendors', [VendorController::class, 'store']);
+                Route::post('vendors/{vendor}/payouts', [VendorController::class, 'payout']);
+            });
+        }
 
-        Route::middleware('commerce.api:subscriptions.read')->group(function (): void {
-            Route::get('subscriptions', [SubscriptionController::class, 'index']);
-            Route::get('subscriptions/{subscription}', [SubscriptionController::class, 'show']);
-            Route::get('subscription-plans', [SubscriptionPlanController::class, 'index']);
-            Route::get('subscription-plans/{plan}', [SubscriptionPlanController::class, 'show']);
-        });
+        if (config('ez-ecommerce.features.subscriptions', false)) {
+            Route::middleware('commerce.api:subscriptions.read')->group(function (): void {
+                Route::get('subscriptions', [SubscriptionController::class, 'index']);
+                Route::get('subscriptions/{subscription}', [SubscriptionController::class, 'show']);
+                Route::get('subscription-plans', [SubscriptionPlanController::class, 'index']);
+                Route::get('subscription-plans/{plan}', [SubscriptionPlanController::class, 'show']);
+            });
 
-        Route::middleware('commerce.api:subscriptions.write')->group(function (): void {
-            Route::post('subscriptions', [SubscriptionController::class, 'store']);
-            Route::post('subscription-plans', [SubscriptionPlanController::class, 'store']);
-        });
+            Route::middleware('commerce.api:subscriptions.write')->group(function (): void {
+                Route::post('subscriptions', [SubscriptionController::class, 'store']);
+                Route::post('subscription-plans', [SubscriptionPlanController::class, 'store']);
+            });
+        }
     });

@@ -14,12 +14,31 @@ use InvalidArgumentException;
 
 final class PaymentGatewayRegistry
 {
+    /** @var array<string, class-string<PaymentGateway>> */
+    private array $extensions = [];
+
     public function __construct(
         private readonly Application $app,
     ) {}
 
+    /** @param  class-string<PaymentGateway>  $class */
+    public function extend(string $driver, string $class): void
+    {
+        $this->extensions[$driver] = $class;
+    }
+
     public function for(string $driver): PaymentGateway
     {
+        if (isset($this->extensions[$driver])) {
+            return $this->app->make($this->extensions[$driver]);
+        }
+
+        /** @var array<string, class-string<PaymentGateway>> $configured */
+        $configured = config('ez-ecommerce.drivers.payment.gateways', []);
+        if (isset($configured[$driver])) {
+            return $this->app->make($configured[$driver]);
+        }
+
         return match ($driver) {
             'null' => $this->app->make(NullPaymentGateway::class),
             'manual', 'net_terms' => $this->app->make(ManualPaymentGateway::class),

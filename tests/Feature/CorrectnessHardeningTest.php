@@ -1,5 +1,6 @@
 <?php
 
+use EzEcommerce\Core\Enums\CheckoutStatus;
 use EzEcommerce\Core\Enums\IdempotencyStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Models\IdempotencyRecord;
@@ -64,20 +65,34 @@ it('rejects refund above captured balance', function () {
     ))->toThrow(InvalidArgumentException::class);
 })->group('hardening');
 
-it('persists failed_retryable idempotency after gateway exception', function () {
+it('returns cached checkout after payment session failure', function () {
     ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 100, stock: 5);
     ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
     EzEcommerce::cart()->addItem($cart, $variant, 1);
 
     $key = 'idem-fail-'.uniqid();
+    $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
+    $hash = EzEcommerce::cart()->totalsHash($cart, 'flat');
 
-    try {
-        placeCheckoutOrder($cart, $key, 'flat', 'null');
-    } catch (InvalidArgumentException) {
-        // null gateway rejects non-zero totals
-    }
+    $first = EzEcommerce::checkout()->for($cart)
+        ->shippingMethod('flat')
+        ->paymentMethod('null')
+        ->place(idempotencyKey: $key, expectedTotalsHash: $hash);
+
+    expect($first->status)->toBe(CheckoutStatus::PaymentSessionFailed);
+    expect($first->order)->not->toBeNull();
+    expect($first->payment)->not->toBeNull();
 
     $record = IdempotencyRecord::query()->where('key', $key)->first();
     expect($record)->not->toBeNull();
-    expect($record->status)->toBe(IdempotencyStatus::FailedRetryable);
+    expect($record->status)->toBe(IdempotencyStatus::Completed);
+
+    $second = EzEcommerce::checkout()->for($cart->fresh())
+        ->shippingMethod('flat')
+        ->paymentMethod('null')
+        ->place(idempotencyKey: $key, expectedTotalsHash: $hash);
+
+    expect($second->order->id)->toBe($first->order->id);
+    expect($second->payment->id)->toBe($first->payment->id);
+    expect($second->status)->toBe(CheckoutStatus::PaymentSessionFailed);
 })->group('hardening');

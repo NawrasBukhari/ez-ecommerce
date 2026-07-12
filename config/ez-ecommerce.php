@@ -16,6 +16,15 @@ return [
     'drivers' => [
         'payment' => [
             'default' => env('COMMERCE_PAYMENT_DRIVER', 'manual'),
+            'gateways' => [
+                'null' => \EzEcommerce\Payments\Drivers\NullPaymentGateway::class,
+                'manual' => \EzEcommerce\Payments\Drivers\ManualPaymentGateway::class,
+                'net_terms' => \EzEcommerce\Payments\Drivers\ManualPaymentGateway::class,
+                'fake' => \EzEcommerce\Payments\Drivers\FakePaymentGateway::class,
+                'stripe' => \EzEcommerce\Payments\Drivers\StripePaymentGateway::class,
+                'paypal' => \EzEcommerce\Payments\Drivers\PayPalPaymentGateway::class,
+                'telr' => \EzEcommerce\Payments\Drivers\TelrPaymentGateway::class,
+            ],
             'stripe' => [
                 'secret' => env('STRIPE_SECRET'),
                 'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),

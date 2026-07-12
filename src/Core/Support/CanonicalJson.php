@@ -18,7 +18,9 @@ final class CanonicalJson
      */
     private static function sortKeys(array $data): array
     {
-        ksort($data);
+        if (! array_is_list($data)) {
+            ksort($data);
+        }
 
         foreach ($data as $key => $value) {
             if (is_array($value)) {

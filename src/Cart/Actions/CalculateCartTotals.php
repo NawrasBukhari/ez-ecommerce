@@ -64,9 +64,19 @@ final class CalculateCartTotals
                 $lineSubtotal = $quote->unitPrice->multiply($item->quantity);
                 $subtotalMinor += $lineSubtotal->minorAmount;
 
+                $existingMeta = $item->metadata instanceof \ArrayObject
+                    ? $item->metadata->getArrayCopy()
+                    : (array) ($item->metadata ?? []);
+
                 $item->update([
                     'unit_price_minor' => $quote->unitPrice->minorAmount,
                     'currency' => $quote->unitPrice->currency,
+                    'metadata' => array_merge($existingMeta, [
+                        'price_source' => $quote->source,
+                        'price_record_id' => $quote->priceId,
+                        'price_metadata' => $quote->metadata,
+                        'price_quote_hash' => $quote->fingerprint(),
+                    ]),
                 ]);
 
                 $shippingLines[] = [

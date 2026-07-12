@@ -7,6 +7,10 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $request_metadata
+ * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $response_metadata
+ */
 class PaymentAttempt extends CommerceModel
 {
     protected $table = 'commerce_payment_attempts';

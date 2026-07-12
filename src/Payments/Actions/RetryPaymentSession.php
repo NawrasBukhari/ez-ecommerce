@@ -2,23 +2,20 @@
 
 namespace EzEcommerce\Payments\Actions;
 
-use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\PaymentStatus;
-use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
-use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 
 final class RetryPaymentSession
 {
     public function __construct(
-        private readonly Clock $clock,
         private readonly PaymentGatewayRegistry $gateways,
+        private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
     ) {}
 
     public function execute(Payment $payment, PaymentAttempt $attempt, Order $order): PaymentSessionResult
@@ -30,7 +27,9 @@ final class RetryPaymentSession
             attempt: $attempt,
             order: $order,
             amount: Money::fromMinor($payment->amount_minor, $payment->currency),
-            metadata: $attempt->request_metadata?->toArray() ?? [],
+            metadata: $attempt->request_metadata instanceof \ArrayObject
+                ? $attempt->request_metadata->getArrayCopy()
+                : (array) ($attempt->request_metadata ?? []),
         );
 
         $result = $gateway->createSession($data);
@@ -46,20 +45,17 @@ final class RetryPaymentSession
         ]);
 
         if ($result->succeeded()) {
-            $payment->update(['status' => $result->status]);
-
             if ($result->status === PaymentStatus::Captured) {
-                PaymentTransaction::query()->create([
-                    'payment_id' => $payment->id,
-                    'attempt_id' => $attempt->id,
-                    'type' => PaymentTransactionType::Capture,
-                    'amount_minor' => $payment->amount_minor,
-                    'currency' => $payment->currency,
-                    'external_id' => $result->externalId,
-                    'status' => 'succeeded',
-                    'processed_at' => $this->clock->now(),
-                ]);
-                $payment->update(['captured_minor' => $payment->amount_minor]);
+                $this->finalizeAcceptedPayment->execute(
+                    $payment,
+                    $attempt,
+                    $payment->amount_minor,
+                    $payment->currency,
+                    $result->externalId,
+                    $result->metadata,
+                );
+            } else {
+                $payment->update(['status' => $result->status]);
             }
         } elseif ($result->failure?->retryable) {
             $attempt->update(['status' => 'failed_retryable']);

@@ -83,6 +83,9 @@ final class CreateOrderFromCart
         foreach ($cart->items as $cartItem) {
             $purchasable = $cartItem->purchasable;
             $lineSubtotal = $cartItem->unit_price_minor * $cartItem->quantity;
+            $itemMeta = $cartItem->metadata instanceof \ArrayObject
+                ? $cartItem->metadata->getArrayCopy()
+                : (array) ($cartItem->metadata ?? []);
 
             OrderItem::query()->create([
                 'order_id' => $order->id,
@@ -94,10 +97,10 @@ final class CreateOrderFromCart
                 'unit_price_minor' => $cartItem->unit_price_minor,
                 'subtotal_minor' => $lineSubtotal,
                 'total_minor' => $lineSubtotal,
-                'price_source' => 'cart',
-                'price_record_id' => null,
-                'price_quote_hash' => hash('sha256', $cartItem->unit_price_minor.':'.$cartItem->quantity),
-                'price_metadata' => [],
+                'price_source' => $itemMeta['price_source'] ?? 'cart',
+                'price_record_id' => $itemMeta['price_record_id'] ?? null,
+                'price_quote_hash' => $itemMeta['price_quote_hash'] ?? hash('sha256', $cartItem->unit_price_minor.':'.$cartItem->quantity),
+                'price_metadata' => $itemMeta['price_metadata'] ?? [],
                 'priced_at' => new DateTimeImmutable,
                 'product_snapshot' => array_merge($purchasable->purchasableMetadata(), [
                     'purchasable_type' => $cartItem->purchasable_type,

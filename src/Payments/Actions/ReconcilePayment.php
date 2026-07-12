@@ -3,11 +3,7 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Contracts\Clock;
-use EzEcommerce\Core\Enums\PaymentStatus;
-use EzEcommerce\Core\Events\OrderPaid;
-use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
-use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Data\GatewayWebhookEvent;
 use EzEcommerce\Payments\Data\WebhookRequestData;
@@ -17,7 +13,6 @@ use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 
 final class ReconcilePayment
 {
@@ -26,8 +21,7 @@ final class ReconcilePayment
         private readonly PaymentGatewayRegistry $gateways,
         private readonly ApplyPaymentCapture $applyPaymentCapture,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-        private readonly ConfirmOrderOnPaymentAccepted $confirmOrderOnPaymentAccepted,
-        private readonly CommitReservation $commitReservation,
+        private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
     ) {}
 
     public function execute(WebhookRequestData $request): GatewayWebhookEvent
@@ -94,23 +88,17 @@ final class ReconcilePayment
                     $event->metadata,
                 );
 
-                $order = $payment->order;
-                $this->recalculateOrderPaymentStatus->execute($order);
-                $this->confirmOrderOnPaymentAccepted->execute($order);
+                $this->recalculateOrderPaymentStatus->execute($payment->order);
 
-                if ($payment->status === PaymentStatus::Captured) {
-                    try {
-                        $this->commitReservation->executeForOrder($order);
-                    } catch (ReservationExpiredException $e) {
-                        $record->update([
-                            'status' => 'failed',
-                            'last_error' => $e->getMessage(),
-                        ]);
+                try {
+                    $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment);
+                } catch (ReservationExpiredException $e) {
+                    $record->update([
+                        'status' => 'failed',
+                        'last_error' => $e->getMessage(),
+                    ]);
 
-                        return;
-                    }
-
-                    Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+                    return;
                 }
 
                 $record->update([
