@@ -12,9 +12,11 @@ use EzEcommerce\Core\Enums\AdjustmentType;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Customers\Models\Address;
+use EzEcommerce\Customers\Models\Customer;
+use EzEcommerce\Customers\Models\CustomerGroup;
+use EzEcommerce\Pricing\Actions\ResolveCartPriceList;
 use EzEcommerce\Pricing\Contracts\PriceResolver;
 use EzEcommerce\Pricing\Data\PricingContext;
-use EzEcommerce\Pricing\Models\PriceList;
 use EzEcommerce\Shipping\Contracts\ShippingCalculator;
 use EzEcommerce\Shipping\Data\ShippingRequest;
 use EzEcommerce\Taxes\Contracts\TaxCalculator;
@@ -27,6 +29,7 @@ final class CalculateCartTotals
         private readonly PriceResolver $priceResolver,
         private readonly TaxCalculator $taxCalculator,
         private readonly ShippingCalculator $shippingCalculator,
+        private readonly ResolveCartPriceList $resolveCartPriceList,
     ) {
     }
 
@@ -45,8 +48,10 @@ final class CalculateCartTotals
 
             $cart->load('items.purchasable', 'adjustments', 'customer.customerGroup');
 
-            $priceList = $this->resolvePriceList($cart);
-            $customerGroup = $cart->customer?->customerGroup;
+            $priceList = $this->resolveCartPriceList->for($cart);
+            $customer = $cart->customer instanceof Customer ? $cart->customer : null;
+            $customerGroup = $customer?->customerGroup;
+            $customerGroupModel = $customerGroup instanceof CustomerGroup ? $customerGroup : null;
 
             $subtotalMinor = 0;
             $shippingLines = [];
@@ -57,8 +62,8 @@ final class CalculateCartTotals
                 $quote = $this->priceResolver->resolve($purchasable, new PricingContext(
                     currency: $cart->currency,
                     quantity: $item->quantity,
-                    customer: $cart->customer,
-                    customerGroup: $customerGroup,
+                    customer: $customer,
+                    customerGroup: $customerGroupModel,
                     priceList: $priceList,
                 ));
 
@@ -188,14 +193,20 @@ final class CalculateCartTotals
         return DB::transaction($callback);
     }
 
-    public function totalsHash(Cart $cart, ?string $shippingMethod = null): string
+    public function totalsHash(Cart $cart, ?string $shippingMethod = null, ?Address $shippingAddress = null): string
     {
         $cart->loadMissing('items', 'adjustments');
+
+        $metadata = $cart->metadata instanceof \ArrayObject
+            ? $cart->metadata->getArrayCopy()
+            : (array) ($cart->metadata ?? []);
 
         return hash('sha256', CanonicalJson::encode([
             'cart_id' => $cart->id,
             'currency' => $cart->currency,
             'shipping_method' => $shippingMethod,
+            'price_list_id' => $metadata['price_list_id'] ?? null,
+            'shipping_address' => $this->addressFingerprint($shippingAddress),
             'items' => $cart->items->map(fn ($i) => [
                 'id' => $i->id,
                 'purchasable_type' => $i->purchasable_type,
@@ -216,16 +227,24 @@ final class CalculateCartTotals
         ]));
     }
 
-    private function resolvePriceList(Cart $cart): ?PriceList
+    /** @return array<string, mixed>|null */
+    private function addressFingerprint(?Address $address): ?array
     {
-        $metadata = $cart->metadata instanceof \ArrayObject
-            ? $cart->metadata->getArrayCopy()
-            : (array) ($cart->metadata ?? []);
-        $priceListId = $metadata['price_list_id'] ?? null;
-        if (! is_string($priceListId) || $priceListId === '') {
+        if ($address === null) {
             return null;
         }
 
-        return PriceList::query()->where('public_id', $priceListId)->first();
+        if (! $address->exists) {
+            return array_filter([
+                'line1' => $address->line1,
+                'line2' => $address->line2,
+                'city' => $address->city,
+                'state' => $address->state,
+                'postal_code' => $address->postal_code,
+                'country_code' => $address->country_code,
+            ], static fn (mixed $value): bool => $value !== null && $value !== '');
+        }
+
+        return ['id' => $address->id];
     }
 }

@@ -19,6 +19,8 @@ final class CheckoutBuilder
 
     private ?CustomerIdentity $customerIdentity = null;
 
+    private bool $restrictPublicPaymentMethods = false;
+
     public function __construct(
         private readonly Cart $cart,
         private readonly PlaceOrder $placeOrder,
@@ -60,6 +62,13 @@ final class CheckoutBuilder
         return $this;
     }
 
+    public function restrictPublicPaymentMethods(bool $restrict = true): self
+    {
+        $this->restrictPublicPaymentMethods = $restrict;
+
+        return $this;
+    }
+
     public function place(string $idempotencyKey, ?string $expectedTotalsHash = null): CheckoutResult
     {
         return $this->placeOrder->execute(
@@ -71,6 +80,7 @@ final class CheckoutBuilder
             idempotencyKey: $idempotencyKey,
             expectedTotalsHash: $expectedTotalsHash,
             customerIdentity: $this->customerIdentity,
+            restrictPublicPaymentMethods: $this->restrictPublicPaymentMethods,
         );
     }
 }

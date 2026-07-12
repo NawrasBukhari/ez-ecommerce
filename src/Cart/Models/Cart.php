@@ -7,6 +7,7 @@ use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Orders\Models\Order;
+use ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,6 +16,16 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 /**
  * @property int $version
  * @property int|null $customer_id
+ * @property string $currency
+ * @property CartStatus $status
+ * @property int $subtotal_minor
+ * @property int $discount_total_minor
+ * @property int $tax_total_minor
+ * @property int $shipping_total_minor
+ * @property int $fee_total_minor
+ * @property int $grand_total_minor
+ * @property ArrayObject<int|string, mixed>|null $metadata
+ * @property-read Customer|null $customer
  */
 class Cart extends CommerceModel
 {

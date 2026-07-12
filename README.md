@@ -177,21 +177,80 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 
 ## Production readiness
 
-Honest tiers as of the latest hardening sprint. *"Prototype"* means "works in tests and my Stripe sandbox"; *"Strong beta"* means "I'd deploy it before lunch, but I'd eat lunch first."
+**Overall: 7/10** — strong beta commerce engine; PSP paths still have blockers.  
+*Current head: `8f5633a8` — gateway webhook refs + inventory finalization hardening.*
 
-| Tier | Status | Notes |
-|------|--------|-------|
-| **Manual / null checkout** | Strong beta | Idempotent checkout, inventory reservations, capture, fulfill, refund, operator reconciliation |
-| **Headless REST API** | Beta | Full cart/checkout/order surface; scoped tokens; guest + admin auth |
-| **Stripe** | Integration prototype | Manual capture PaymentIntents; webhook ledger; idempotency keys — verify in your Stripe account before live money |
-| **PayPal** | Integration prototype | Order capture flow; native webhook verify when `PAYPAL_WEBHOOK_ID` set; approval ≠ capture |
-| **Telr** | Sessions + verified refunds only | No server-side capture; payment success only from verified Telr callback/webhook |
+| Area | Rating |
+|------|--------|
+| Package architecture | 9/10 |
+| Orders and inventory | 8.5/10 |
+| Checkout transaction design | 8/10 |
+| Manual/null payments | 8.5/10 |
+| Headless REST API | 7/10 |
+| Stripe integration | 5.5/10 |
+| PayPal integration | 6/10 |
+| Telr integration | 5.5/10 |
+| Tests and CI | 5/10 |
+
+### Classification
+
+| Tier | Verdict |
+|------|---------|
+| **Core / manual commerce** | Strong beta |
+| **Inventory + order lifecycle** | Close to production after concurrent tests |
+| **REST storefront checkout** | Functional — missing policy + address-aware quoting |
+| **Stripe** | Not production-ready (refs, partial capture, webhook retries) |
+| **PayPal** | Closer — session retry + async refunds still unsafe |
+| **Telr** | Safer sessions/refunds — capability enforcement improving |
 
 Before treating payments as production-ready:
 
 1. Run `vendor/bin/pest --group=hardening` on **MySQL** (CI does this).
 2. Configure real webhook secrets and API tokens (never `COMMERCE_API_ALLOW_UNAUTHENTICATED=true` in prod).
 3. Exercise operator commands for your PSP (`commerce:reconcile-*`). Think of them as commerce therapy for when the network blinks mid-capture.
+
+### Recently fixed (hardening sprint)
+
+- Webhook DTO: `eventId` / `paymentReference` / `transactionReference`
+- PayPal: `CHECKOUT.ORDER.APPROVED` no longer treated as captured
+- Stripe: `capture_method=manual` on PaymentIntents
+- Telr: verified session ref, no fake capture, refunds only on accepted response
+- Dedicated capture attempts; gated session retries; checkout identity/addresses
+- Fulfillment requires full PSP capture; inventory finalization → manual review
+- **Latest:** capture webhook idempotency, Stripe `ch_*` ledger refs, PG idempotency fix, safer session retry
+
+### Remaining production blockers
+
+Most sprint blockers from the `8f5633a8` review are now addressed in code. Remaining gaps before calling PSP paths production-grade:
+
+1. **Real PSP contract tests** — gateway drivers tested via fakes/mocks only; no Stripe/PayPal/Telr sandbox CI
+2. **Multi-process race tests** — sequential Pest + row locks; true multi-process CI still open
+
+### Recently fixed (latest sprint)
+
+- Public checkout **payment-method policy** (`checkout.public_payment_methods`)
+- **Price-list eligibility** contract + validation on calculate/checkout
+- **Address-aware cart quote** + matching `totals_hash`
+- **Refund webhook reconciliation** (`ReconcileRefund`)
+- **Pending refund** status from Stripe (no longer marked failed immediately)
+- **Cart version** atomic bumps on mutations
+- **Caller idempotency** on capture/refund/retry/**cancel/complete/fulfill** API endpoints
+- **API 409/422** exception mapping
+- **PostgreSQL CI** hardening job
+- **Stripe partial capture** policy (`allow_partial_capture` config)
+- **Duplicate OrderPaid** guard via `order_paid_dispatched` metadata
+- **Outbound webhooks** throw on non-2xx (enables queue retries)
+- **Stale pending capture** listing (`commerce:reconcile-payments --list-stale`)
+
+### Payment driver tiers
+
+| Tier | Status | Notes |
+|------|--------|-------|
+| **Manual / null checkout** | Strong beta | Idempotent checkout, inventory, capture, fulfill, refund, reconciliation |
+| **Headless REST API** | Beta | Full surface; scoped tokens; guest + admin auth |
+| **Stripe** | Integration prototype | Manual capture; ledger uses `ch_*` — verify before live money |
+| **PayPal** | Integration prototype | Order capture; `PAYPAL_WEBHOOK_ID` for native verify |
+| **Telr** | Sessions + refunds only | No capture; attempts rejected before PSP call |
 
 ---
 
@@ -243,12 +302,11 @@ The honest "please don't `@` me on GitHub about this" list:
 
 - **Storefront / admin UI** — headless only; you build the front end. We sell engines, not paint jobs.
 - **Catalog update/delete API** — create + read only.
-- **Refund webhook reconciliation** — async PSP refund events not fully wired.
-- **Outbound webhook delivery guarantees** — host must run queue workers; retries need hardening.
-- **Automated bank/PSP payouts** — payout API records commissions as paid.
-- **PostgreSQL CI job** — supported by schema, not in CI matrix yet.
-- **Multi-process concurrency tests** — sequential Pest only.
+- **Automated bank/PSP payouts** — payout API records commissions as paid; no bank transfers
+- **Real PSP sandbox contract tests** — Stripe/PayPal/Telr live paths not in CI
+- **Multi-process concurrency tests** — cart `version` bumps are atomic; true multi-process CI still open
 - **`currency.rounding` config** — defined, unused. Schrödinger's setting.
+- **PayPal `CHECKOUT.ORDER.APPROVED`** — no server-side capture trigger yet
 
 `OrderManager::fulfill()` is **not** on the `EzEcommerce` facade — use DI or the API. We hid fulfill on purpose so you wouldn't one-line your way into shipping unpaid orders. You're welcome. Again.
 
@@ -340,7 +398,7 @@ Forgot the token? The API says no. This is commerce, not a house party.
 | `GET` | `/cart/{id}` | Guest token required |
 | `POST/PATCH/DELETE` | `/cart/{id}/items[...]` | `variant_id`, `quantity`, optional `expected_version` |
 | `POST/DELETE` | `/cart/{id}/discount` | Apply/remove promo |
-| `POST` | `/cart/{id}/calculate` | `{ "shipping_method", "price_list_id"? }` → `totals_hash` |
+| `POST` | `/cart/{id}/calculate` | `{ "shipping_method", "price_list_id"?, "shipping_address"? }` → `totals_hash` |
 | `POST` | `/checkout` | See [Quick start (REST API)](#quick-start-rest-api); optional `price_list_id` |
 
 ### Order & admin routes (token required)
@@ -348,12 +406,12 @@ Forgot the token? The API says no. This is commerce, not a house party.
 | Method | Path | Scope |
 |--------|------|-------|
 | `GET` | `/orders/{id}` | `orders.read` |
-| `POST` | `/orders/{id}/capture` | `orders.write` |
-| `POST` | `/orders/{id}/fulfill` | `orders.write` |
-| `POST` | `/orders/{id}/refund` | `orders.write` |
-| `POST` | `/orders/{id}/retry-payment` | `orders.write` |
-| `POST` | `/orders/{id}/cancel` | `orders.write` |
-| `POST` | `/orders/{id}/complete` | `orders.write` |
+| `POST` | `/orders/{id}/capture` | `orders.write` + `Idempotency-Key` |
+| `POST` | `/orders/{id}/fulfill` | `orders.write` + `Idempotency-Key` |
+| `POST` | `/orders/{id}/refund` | `orders.write` + `Idempotency-Key` |
+| `POST` | `/orders/{id}/retry-payment` | `orders.write` + `Idempotency-Key` |
+| `POST` | `/orders/{id}/cancel` | `orders.write` + `Idempotency-Key` |
+| `POST` | `/orders/{id}/complete` | `orders.write` + `Idempotency-Key` |
 | `GET` | `/orders/{id}/transitions`, `/fulfillments`, `/refunds`, `/payments` | `orders.read` |
 | `POST` | `/orders/{id}/returns` | `orders.write` |
 | `GET/POST` | `/returns[...]` | `returns.read` / `returns.write` |
@@ -552,7 +610,7 @@ Outbound webhooks example:
 
 | Result | What to do |
 |--------|------------|
-| All 97 green | You're ready to go. Ship it. Tell nobody you only ran the tests once. |
+| All 102 green | You're ready to go. Ship it. Tell nobody you only ran the tests once. |
 | One red | Panic. Then fix it. Then panic again because you almost shipped. |
 | All red | Close the laptop. The engine is telling you something. Probably "sleep." |
 | PHPStan green, Pest red | Your types are lying. Trust the tests. |
@@ -571,12 +629,15 @@ vendor/bin/phpstan analyse --memory-limit=512M
 |-----|----------------|
 | **SQLite matrix** | PHP 8.2–8.4 × Laravel 11/12/13; `pest` + PHPStan (`--prefer-lowest`) |
 | **Hardening (MySQL)** | `pest --group=hardening` on MySQL 8 |
+| **Hardening (PostgreSQL)** | `pest --group=hardening` on PostgreSQL 16 |
 
 Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conflicts. PHPStan and Canvas have… history.
 
-### Test suite (97 tests, 13 files)
+### Test suite (102 tests, 13 files)
 
-*97 tests can't prove your checkout works in prod, but 97 failures can prove it doesn't work in CI. Start there.*
+*102 tests can't prove your checkout works in prod, but 102 failures can prove it doesn't work in CI. Start there.*
+
+CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=hardening`).
 
 | File | Focus |
 |------|-------|
@@ -595,13 +656,10 @@ Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conf
 
 ## Roadmap
 
-Things we know we still owe the universe:
-
-1. Refund webhook reconciliation (async PSP lifecycle) — because "we'll check the dashboard" is not a strategy
-2. Outbound webhook delivery retries (throw on non-2xx)
+1. Real Stripe/PayPal/Telr contract tests (sandbox)
+2. Multi-process concurrent race tests in CI
 3. Catalog update/delete API
-4. PostgreSQL CI + concurrent transaction tests
-5. PayPal `CHECKOUT.ORDER.APPROVED` → server-side capture trigger
+4. PayPal `CHECKOUT.ORDER.APPROVED` → server-side capture trigger
 
 See [`AGENTS.md`](AGENTS.md) for implementation constraints.
 

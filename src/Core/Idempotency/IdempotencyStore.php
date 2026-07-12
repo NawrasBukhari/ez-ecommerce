@@ -23,13 +23,11 @@ final class IdempotencyStore
      */
     public function execute(string $scope, string $key, string $requestHash, callable $operation): array
     {
-        $early = DB::transaction(function () use ($scope, $key, $requestHash): array {
-            try {
-                return $this->acquireOrReplay($scope, $key, $requestHash);
-            } catch (UniqueConstraintViolationException) {
-                return $this->acquireOrReplay($scope, $key, $requestHash);
-            }
-        });
+        try {
+            $early = DB::transaction(fn (): array => $this->acquireOrReplay($scope, $key, $requestHash));
+        } catch (UniqueConstraintViolationException) {
+            $early = DB::transaction(fn (): array => $this->acquireOrReplay($scope, $key, $requestHash));
+        }
 
         if (! $early['run']) {
             return ['record' => $early['record'], 'result' => $early['result']];

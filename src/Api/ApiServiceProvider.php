@@ -5,6 +5,7 @@ namespace EzEcommerce\Api;
 use EzEcommerce\Api\Http\Middleware\CommerceApiToken;
 use EzEcommerce\Api\Http\Middleware\GuestCartToken;
 use EzEcommerce\Api\Http\Middleware\ValidateCheckoutCartAccess;
+use EzEcommerce\Api\Http\RegistersCommerceApiExceptions;
 use EzEcommerce\B2B\Models\Company;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
@@ -50,6 +51,8 @@ class ApiServiceProvider extends ServiceProvider
         $router->aliasMiddleware('guest.cart', GuestCartToken::class);
         $router->aliasMiddleware('commerce.api', CommerceApiToken::class);
         $router->aliasMiddleware('checkout.cart', ValidateCheckoutCartAccess::class);
+
+        RegistersCommerceApiExceptions::register();
     }
 
     private function registerRouteBindings(): void

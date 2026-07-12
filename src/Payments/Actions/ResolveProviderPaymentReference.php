@@ -23,6 +23,10 @@ final class ResolveProviderPaymentReference
 
     public function forRefund(Payment $payment): ?string
     {
+        if ($payment->gateway === 'stripe') {
+            return $this->forCapture($payment);
+        }
+
         $captureTransaction = PaymentTransaction::query()
             ->where('payment_id', $payment->id)
             ->where('type', PaymentTransactionType::Capture)

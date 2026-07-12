@@ -4,6 +4,7 @@ use EzEcommerce\Core\Enums\CheckoutStatus;
 use EzEcommerce\Core\Enums\IdempotencyStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Enums\ReservationStatus;
 use EzEcommerce\Core\Events\OrderPaid;
 use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
@@ -20,12 +21,13 @@ use EzEcommerce\Payments\Data\PaymentFailure;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
 use Illuminate\Support\Facades\Event;
 
-uses(SetsUpCatalog::class);
+uses(SetsUpCatalog::class, \EzEcommerce\Tests\Support\UsesCommerceApi::class);
 
 it('confirms order after manual capture', function () {
     ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
@@ -353,4 +355,91 @@ it('retries unknown capture using the stored request amount snapshot', function 
     app(ReconcileCaptureAttempt::class)->retry($attempt->fresh());
 
     expect($payment->fresh()->captured_minor)->toBe(7000);
+})->group('hardening');
+
+it('treats post-capture webhook as idempotent when payment is already fully captured', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'webhook-idem-'.uniqid());
+
+    $payment = $result->payment->fresh();
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+
+    app(ApplyPaymentCapture::class)->execute(
+        $payment,
+        $attempt,
+        $payment->amount_minor,
+        $payment->currency,
+        'ch_direct_capture',
+    );
+
+    $payment = $payment->fresh();
+    expect($payment->status)->toBe(PaymentStatus::Captured);
+
+    app(ApplyPaymentCapture::class)->execute(
+        $payment,
+        null,
+        $payment->amount_minor,
+        $payment->currency,
+        'ch_webhook_retry',
+    );
+
+    expect($payment->fresh()->captured_minor)->toBe($payment->amount_minor);
+    expect(PaymentTransaction::query()
+        ->where('payment_id', $payment->id)
+        ->where('type', PaymentTransactionType::Capture)
+        ->count())->toBe(1);
+})->group('hardening');
+
+it('rejects concurrent cart version bumps', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 1000, stock: 10);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $cart = $cart->fresh();
+    $version = $cart->version;
+
+    EzEcommerce::cart()->addItem($cart, $variant, 1, $version);
+
+    expect(fn () => EzEcommerce::cart()->addItem($cart->fresh(), $variant, 1, $version))
+        ->toThrow(\EzEcommerce\Cart\Exceptions\CartVersionConflictException::class);
+})->group('hardening');
+
+it('includes shipping address in totals hash', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+
+    $address = new \EzEcommerce\Customers\Models\Address([
+        'type' => 'shipping',
+        'line1' => '1 Test St',
+        'city' => 'Dubai',
+        'country_code' => 'AE',
+    ]);
+
+    $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat', $address);
+    $hashWithAddress = EzEcommerce::cart()->totalsHash($cart, 'flat', $address);
+    $hashWithoutAddress = EzEcommerce::cart()->totalsHash($cart, 'flat');
+
+    expect($hashWithAddress)->not->toBe($hashWithoutAddress);
+})->group('hardening');
+
+it('replays cancel with the same idempotency key', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
+    $result = placeCheckoutOrder($cart, 'cancel-idem-'.uniqid());
+
+    $key = 'cancel-key-'.uniqid();
+    $headers = array_merge($this->commerceApiHeaders(), ['Idempotency-Key' => $key]);
+
+    $this->withHeaders($headers)
+        ->postJson("/api/ez-commerce/v1/orders/{$result->order->public_id}/cancel", ['reason' => 'Changed mind'])
+        ->assertOk();
+
+    $this->withHeaders($headers)
+        ->postJson("/api/ez-commerce/v1/orders/{$result->order->public_id}/cancel", ['reason' => 'Changed mind'])
+        ->assertOk()
+        ->assertJsonPath('status', OrderStatus::Cancelled->value);
 })->group('hardening');

@@ -8,7 +8,9 @@ use EzEcommerce\Api\Http\Resources\OrderTransitionResource;
 use EzEcommerce\Api\Http\Resources\PaymentResource;
 use EzEcommerce\Api\Http\Resources\PaymentTransactionResource;
 use EzEcommerce\Api\Http\Resources\RefundResource;
+use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Money\Money;
+use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Actions\CancelOrder;
 use EzEcommerce\Orders\Actions\CompleteOrder;
@@ -24,6 +26,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Routing\Controller;
+use RuntimeException;
 
 final class OrderController extends Controller
 {
@@ -34,6 +37,7 @@ final class OrderController extends Controller
         private readonly RetryPaymentSession $retryPaymentSession,
         private readonly CancelOrder $cancelOrder,
         private readonly CompleteOrder $completeOrder,
+        private readonly IdempotencyStore $idempotencyStore,
     ) {
     }
 
@@ -83,31 +87,59 @@ final class OrderController extends Controller
 
     public function cancel(Request $request, Order $order): OrderResource
     {
+        $idempotencyKey = $this->requireIdempotencyKey($request);
+
         $validated = $request->validate([
             'reason' => ['sometimes', 'nullable', 'string'],
         ]);
 
-        $order = $this->cancelOrder->execute($order, $validated['reason'] ?? null);
+        $reason = $validated['reason'] ?? null;
+        $requestHash = hash('sha256', CanonicalJson::encode([
+            'order_id' => $order->id,
+            'reason' => $reason,
+        ]));
 
-        return new OrderResource($order->load('items', 'payments'));
+        $orderId = $this->runIdempotentOrderMutation(
+            scope: 'order_cancel',
+            idempotencyKey: $idempotencyKey,
+            requestHash: $requestHash,
+            operation: fn () => $this->cancelOrder->execute($order, $reason)->id,
+        );
+
+        return new OrderResource(Order::query()->with(['items', 'payments'])->findOrFail($orderId));
     }
 
     public function complete(Request $request, Order $order): OrderResource
     {
+        $idempotencyKey = $this->requireIdempotencyKey($request);
+
         $validated = $request->validate([
             'reason' => ['sometimes', 'nullable', 'string'],
         ]);
 
-        $order = $this->completeOrder->execute($order, $validated['reason'] ?? null);
+        $reason = $validated['reason'] ?? null;
+        $requestHash = hash('sha256', CanonicalJson::encode([
+            'order_id' => $order->id,
+            'reason' => $reason,
+        ]));
 
-        return new OrderResource($order->load('items', 'payments'));
+        $orderId = $this->runIdempotentOrderMutation(
+            scope: 'order_complete',
+            idempotencyKey: $idempotencyKey,
+            requestHash: $requestHash,
+            operation: fn () => $this->completeOrder->execute($order, $reason)->id,
+        );
+
+        return new OrderResource(Order::query()->with(['items', 'payments'])->findOrFail($orderId));
     }
 
-    public function capture(Order $order): OrderResource
+    public function capture(Request $request, Order $order): OrderResource
     {
+        $idempotencyKey = $this->requireIdempotencyKey($request);
+
         $payment = $order->payments()->latest()->firstOrFail();
 
-        $this->capturePayment->executeForPayment($payment);
+        $this->capturePayment->executeForPayment($payment, null, $idempotencyKey);
 
         $order->refresh()->load('items', 'payments');
 
@@ -116,31 +148,52 @@ final class OrderController extends Controller
 
     public function fulfill(Request $request, Order $order): JsonResponse
     {
+        $idempotencyKey = $this->requireIdempotencyKey($request);
+
         $validated = $request->validate([
             'order_item_id' => ['required', 'integer'],
             'quantity' => ['required', 'integer', 'min:1'],
         ]);
 
-        $item = OrderItem::query()
-            ->where('order_id', $order->id)
-            ->where('id', $validated['order_item_id'])
-            ->firstOrFail();
+        $requestHash = hash('sha256', CanonicalJson::encode([
+            'order_id' => $order->id,
+            'order_item_id' => $validated['order_item_id'],
+            'quantity' => $validated['quantity'],
+        ]));
 
-        $this->orderManager->fulfill($order, $item, $validated['quantity']);
+        ['result' => $cached] = $this->idempotencyStore->execute(
+            'order_fulfill',
+            $idempotencyKey,
+            $requestHash,
+            function () use ($order, $validated): array {
+                $item = OrderItem::query()
+                    ->where('order_id', $order->id)
+                    ->where('id', $validated['order_item_id'])
+                    ->firstOrFail();
 
-        $fulfillment = Fulfillment::query()
-            ->where('order_id', $order->id)
-            ->where('order_item_id', $item->id)
-            ->latest()
-            ->first();
+                $this->orderManager->fulfill($order, $item, $validated['quantity']);
 
-        return response()->json([
-            'data' => [
-                'id' => $fulfillment?->public_id,
-                'order_item_id' => $item->id,
-                'quantity' => $validated['quantity'],
-            ],
-        ], 201);
+                $fulfillment = Fulfillment::query()
+                    ->where('order_id', $order->id)
+                    ->where('order_item_id', $item->id)
+                    ->latest()
+                    ->firstOrFail();
+
+                return [
+                    'resource_type' => 'fulfillment',
+                    'resource_id' => $fulfillment->id,
+                    'payload' => [
+                        'fulfillment_id' => $fulfillment->public_id,
+                        'order_item_id' => $item->id,
+                        'quantity' => $validated['quantity'],
+                    ],
+                ];
+            },
+        );
+
+        $payload = is_array($cached) ? $cached : [];
+
+        return response()->json(['data' => $payload], 201);
     }
 
     public function refund(Request $request, Order $order): RefundResource
@@ -151,6 +204,13 @@ final class OrderController extends Controller
             'idempotency_key' => ['sometimes', 'nullable', 'string'],
         ]);
 
+        $idempotencyKey = $validated['idempotency_key']
+            ?? $request->header('Idempotency-Key');
+
+        if (! is_string($idempotencyKey) || $idempotencyKey === '') {
+            abort(422, 'Idempotency-Key header or idempotency_key body field is required.');
+        }
+
         /** @var Payment $payment */
         $payment = $order->payments()->latest()->firstOrFail();
 
@@ -158,20 +218,20 @@ final class OrderController extends Controller
             $payment,
             Money::fromMinor($validated['amount_minor'], $payment->currency),
             $validated['reason'] ?? null,
-            $validated['idempotency_key']
-                ?? $request->header('Idempotency-Key')
-                ?? '',
+            $idempotencyKey,
         );
 
         return new RefundResource($refund);
     }
 
-    public function retryPayment(Order $order): JsonResponse
+    public function retryPayment(Request $request, Order $order): JsonResponse
     {
+        $idempotencyKey = $this->requireIdempotencyKey($request);
+
         /** @var Payment $payment */
         $payment = $order->payments()->latest()->firstOrFail();
 
-        $result = $this->retryPaymentSession->execute($payment, $order);
+        $result = $this->retryPaymentSession->execute($payment, $order, $idempotencyKey);
 
         $payment->refresh();
 
@@ -187,5 +247,45 @@ final class OrderController extends Controller
                 'error_message' => $result->failure?->message,
             ],
         ]);
+    }
+
+    private function requireIdempotencyKey(Request $request): string
+    {
+        $idempotencyKey = $request->header('Idempotency-Key');
+
+        if (! is_string($idempotencyKey) || $idempotencyKey === '') {
+            abort(422, 'Idempotency-Key header is required.');
+        }
+
+        return $idempotencyKey;
+    }
+
+    /** @param  callable(): int  $operation */
+    private function runIdempotentOrderMutation(
+        string $scope,
+        string $idempotencyKey,
+        string $requestHash,
+        callable $operation,
+    ): int {
+        ['result' => $cached] = $this->idempotencyStore->execute(
+            $scope,
+            $idempotencyKey,
+            $requestHash,
+            function () use ($operation): array {
+                $orderId = $operation();
+
+                return [
+                    'resource_type' => 'order',
+                    'resource_id' => $orderId,
+                    'payload' => ['order_id' => $orderId],
+                ];
+            },
+        );
+
+        if ($cached === null) {
+            throw new RuntimeException("{$scope} idempotency completed without payload.");
+        }
+
+        return (int) ($cached['order_id'] ?? 0);
     }
 }

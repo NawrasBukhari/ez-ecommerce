@@ -9,6 +9,8 @@ use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
 use EzEcommerce\Catalog\Models\ProductVariant;
 use EzEcommerce\CommerceManager;
+use EzEcommerce\Customers\Models\Address;
+use EzEcommerce\Pricing\Actions\ResolveCartPriceList;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -17,6 +19,7 @@ final class CartController extends Controller
 {
     public function __construct(
         private readonly CommerceManager $commerce,
+        private readonly ResolveCartPriceList $resolveCartPriceList,
     ) {
     }
 
@@ -140,9 +143,18 @@ final class CartController extends Controller
             'shipping_method' => ['sometimes', 'nullable', 'string'],
             'price_list_id' => ['sometimes', 'nullable', 'string'],
             'expected_version' => ['sometimes', 'integer'],
+            'shipping_address' => ['sometimes', 'array'],
+            'shipping_address.line1' => ['required_with:shipping_address', 'string', 'max:255'],
+            'shipping_address.line2' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'shipping_address.city' => ['required_with:shipping_address', 'string', 'max:255'],
+            'shipping_address.state' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'shipping_address.postal_code' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'shipping_address.country_code' => ['required_with:shipping_address', 'string', 'size:2'],
         ]);
 
         if (! empty($validated['price_list_id'])) {
+            $this->resolveCartPriceList->for($cart, $validated['price_list_id']);
+
             $metadata = $cart->metadata instanceof \ArrayObject
                 ? $cart->metadata->getArrayCopy()
                 : (array) ($cart->metadata ?? []);
@@ -150,19 +162,37 @@ final class CartController extends Controller
             $cart->update(['metadata' => $metadata]);
         }
 
+        $shippingAddress = isset($validated['shipping_address'])
+            ? $this->shippingAddressFromPayload($validated['shipping_address'])
+            : null;
+
         $cart = $this->commerce->cart()->calculateTotals(
             $cart,
             $validated['shipping_method'] ?? null,
-            null,
+            $shippingAddress,
             $validated['expected_version'] ?? null,
         );
 
         $cart->load('items.purchasable');
 
         $totalsHash = app(CalculateCartTotals::class)
-            ->totalsHash($cart, $validated['shipping_method'] ?? null);
+            ->totalsHash($cart, $validated['shipping_method'] ?? null, $shippingAddress);
 
         return (new CartResource($cart))->additional(['totals_hash' => $totalsHash]);
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    private function shippingAddressFromPayload(array $payload): Address
+    {
+        return new Address([
+            'type' => 'shipping',
+            'line1' => $payload['line1'],
+            'line2' => $payload['line2'] ?? null,
+            'city' => $payload['city'],
+            'state' => $payload['state'] ?? null,
+            'postal_code' => $payload['postal_code'] ?? null,
+            'country_code' => strtoupper((string) $payload['country_code']),
+        ]);
     }
 
     public function merge(Request $request): CartResource

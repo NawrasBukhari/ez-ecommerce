@@ -69,6 +69,10 @@ final class DeliverWebhookJob implements ShouldQueue
                     'delivered_at' => $response->successful() ? now() : null,
                 ]);
             }
+
+            if (! $response->successful()) {
+                throw new \RuntimeException("Outbound webhook delivery failed with HTTP {$response->status()}.");
+            }
         } catch (\Throwable $e) {
             $delivery?->update(['status' => WebhookDeliveryStatus::Failed]);
             throw $e;

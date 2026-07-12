@@ -66,7 +66,7 @@ it('captures and fulfills order via api', function () {
     $orderId = $checkout->json('order.id');
     $headers = $this->commerceApiHeaders();
 
-    $this->withHeaders($headers)
+    $this->withHeaders(array_merge($headers, ['Idempotency-Key' => 'capture-'.$orderId]))
         ->postJson("/api/ez-commerce/v1/orders/{$orderId}/capture")
         ->assertOk();
 
@@ -74,7 +74,7 @@ it('captures and fulfills order via api', function () {
         ->getJson("/api/ez-commerce/v1/orders/{$orderId}")
         ->json('items.0.id');
 
-    $this->withHeaders($headers)
+    $this->withHeaders(array_merge($headers, ['Idempotency-Key' => 'fulfill-'.$orderId]))
         ->postJson("/api/ez-commerce/v1/orders/{$orderId}/fulfill", [
             'order_item_id' => $itemId,
             'quantity' => 1,

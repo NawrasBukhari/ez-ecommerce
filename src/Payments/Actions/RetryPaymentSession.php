@@ -21,12 +21,34 @@ final class RetryPaymentSession
     ) {
     }
 
-    public function execute(Payment $payment, Order $order): PaymentSessionResult
+    public function execute(Payment $payment, Order $order, string $idempotencyKey = ''): PaymentSessionResult
     {
         $payment->refresh();
 
         if (in_array($payment->status, [PaymentStatus::Captured, PaymentStatus::PartiallyCaptured], true)) {
             throw new RuntimeException('Payment is already captured.');
+        }
+
+        if ($idempotencyKey !== '') {
+            $existing = PaymentAttempt::query()
+                ->where('payment_id', $payment->id)
+                ->where('idempotency_key', $idempotencyKey)
+                ->where('operation', 'create_session')
+                ->first();
+
+            if ($existing !== null) {
+                if ($existing->status === 'requires_action') {
+                    return $this->existingSessionResult($existing);
+                }
+
+                if (in_array($existing->status, ['pending', 'unknown'], true)) {
+                    throw new RuntimeException('Payment session with this idempotency key is in progress or requires reconciliation.');
+                }
+
+                if ($existing->status === 'failed_retryable') {
+                    return $this->createSessionForAttempt($payment, $order, $existing);
+                }
+            }
         }
 
         $sourceAttempt = PaymentAttempt::query()
@@ -39,33 +61,72 @@ final class RetryPaymentSession
             throw new RuntimeException('No payment session attempt exists for this payment.');
         }
 
+        if ($sourceAttempt->status === 'requires_action') {
+            return $this->existingSessionResult($sourceAttempt);
+        }
+
+        if ($sourceAttempt->status === 'pending') {
+            throw new RuntimeException('Payment session is in progress.');
+        }
+
         if (! $this->isRetryableSessionAttempt($sourceAttempt)) {
             throw new RuntimeException('Payment session is not in a retryable state.');
         }
 
-        $attempt = PaymentAttempt::query()->create([
+        $attempt = $this->shouldReuseAttempt($sourceAttempt)
+            ? $sourceAttempt
+            : $this->createRetryAttempt($payment, $sourceAttempt, $idempotencyKey);
+
+        return $this->createSessionForAttempt($payment, $order, $attempt);
+    }
+
+    private function shouldReuseAttempt(PaymentAttempt $attempt): bool
+    {
+        return in_array($attempt->status, ['unknown', 'failed_retryable'], true);
+    }
+
+    private function createRetryAttempt(Payment $payment, PaymentAttempt $sourceAttempt, string $idempotencyKey = ''): PaymentAttempt
+    {
+        return PaymentAttempt::query()->create([
             'payment_id' => $payment->id,
             'operation' => 'create_session',
-            'idempotency_key' => 'session_retry:'.$payment->public_id.':'.Str::uuid(),
+            'idempotency_key' => $idempotencyKey !== '' ? $idempotencyKey : 'session_retry:'.$payment->public_id.':'.Str::uuid(),
             'status' => 'pending',
             'request_metadata' => $sourceAttempt->request_metadata instanceof \ArrayObject
                 ? $sourceAttempt->request_metadata->getArrayCopy()
                 : (array) ($sourceAttempt->request_metadata ?? []),
         ]);
+    }
+
+    private function createSessionForAttempt(Payment $payment, Order $order, PaymentAttempt $attempt): PaymentSessionResult
+    {
+        $attempt->update(['status' => 'pending']);
 
         $gateway = $this->gateways->for($payment->gateway);
+
+        $metadata = $attempt->request_metadata instanceof \ArrayObject
+            ? $attempt->request_metadata->getArrayCopy()
+            : (array) ($attempt->request_metadata ?? []);
 
         $data = new CreatePaymentSessionData(
             payment: $payment,
             attempt: $attempt,
             order: $order,
             amount: Money::fromMinor($payment->amount_minor, $payment->currency),
-            metadata: $attempt->request_metadata instanceof \ArrayObject
-                ? $attempt->request_metadata->getArrayCopy()
-                : (array) ($attempt->request_metadata ?? []),
+            metadata: $metadata,
         );
 
-        $result = $gateway->createSession($data);
+        try {
+            $result = $gateway->createSession($data);
+        } catch (\Throwable $e) {
+            $attempt->update([
+                'status' => 'failed_retryable',
+                'error_code' => 'session_exception',
+                'error_message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
 
         $attempt->update([
             'status' => $result->status->value,
@@ -99,11 +160,22 @@ final class RetryPaymentSession
         return $result;
     }
 
+    private function existingSessionResult(PaymentAttempt $attempt): PaymentSessionResult
+    {
+        return new PaymentSessionResult(
+            status: PaymentStatus::RequiresAction,
+            externalId: $attempt->external_id,
+            redirectUrl: $attempt->redirect_url,
+            clientSecret: $attempt->client_secret,
+            metadata: $attempt->response_metadata instanceof \ArrayObject
+                ? $attempt->response_metadata->getArrayCopy()
+                : (array) ($attempt->response_metadata ?? []),
+        );
+    }
+
     private function isRetryableSessionAttempt(PaymentAttempt $attempt): bool
     {
         return in_array($attempt->status, [
-            'pending',
-            'requires_action',
             'failed_retryable',
             'unknown',
             'failed',

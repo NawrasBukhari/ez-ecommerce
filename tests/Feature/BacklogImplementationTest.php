@@ -63,7 +63,7 @@ it('cancels unpaid order and lists transitions', function () {
     $orderId = $checkout->json('order.id');
     $headers = $this->commerceApiHeaders();
 
-    $this->withHeaders($headers)
+    $this->withHeaders(array_merge($headers, ['Idempotency-Key' => 'cancel-'.$orderId]))
         ->postJson("/api/ez-commerce/v1/orders/{$orderId}/cancel", ['reason' => 'Customer request'])
         ->assertOk()
         ->assertJsonPath('status', OrderStatus::Cancelled->value);

@@ -45,6 +45,7 @@ final class PlaceOrder
         private readonly CreatePaymentSession $createPaymentSession,
         private readonly CommitReservation $commitReservation,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
+        private readonly ValidateCheckoutPaymentMethod $validateCheckoutPaymentMethod,
     ) {
     }
 
@@ -57,6 +58,7 @@ final class PlaceOrder
         string $idempotencyKey = '',
         ?string $expectedTotalsHash = null,
         ?CustomerIdentity $customerIdentity = null,
+        bool $restrictPublicPaymentMethods = false,
     ): CheckoutResult {
         if ($idempotencyKey === '') {
             throw new RuntimeException('Checkout idempotency key is required.');
@@ -96,6 +98,7 @@ final class PlaceOrder
                 $shippingMethod,
                 $paymentMethod,
                 $expectedTotalsHash,
+                $restrictPublicPaymentMethods,
             ),
         );
 
@@ -115,6 +118,7 @@ final class PlaceOrder
         ?string $shippingMethod,
         string $paymentMethod,
         string $expectedTotalsHash,
+        bool $restrictPublicPaymentMethods,
     ): array {
         $commercial = DB::transaction(function () use (
             $cart,
@@ -124,6 +128,7 @@ final class PlaceOrder
             $shippingMethod,
             $paymentMethod,
             $expectedTotalsHash,
+            $restrictPublicPaymentMethods,
         ) {
             $cart = Cart::query()->lockForUpdate()->findOrFail($cart->id);
 
@@ -152,9 +157,13 @@ final class PlaceOrder
                 null,
             );
 
-            $actualHash = $this->calculateCartTotals->totalsHash($cart, $shippingMethod);
+            $actualHash = $this->calculateCartTotals->totalsHash($cart, $shippingMethod, $shippingAddress);
             if ($actualHash !== $expectedTotalsHash) {
                 throw CartTotalsChangedException::for($cart);
+            }
+
+            if ($restrictPublicPaymentMethods) {
+                $this->validateCheckoutPaymentMethod->forPublicCheckout($paymentMethod, $cart->grand_total_minor);
             }
 
             $order = $this->createOrderFromCart->execute(

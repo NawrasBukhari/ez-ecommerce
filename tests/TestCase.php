@@ -55,6 +55,9 @@ abstract class TestCase extends Orchestra
         config()->set('ez-ecommerce.api.scoped_tokens', [
             'test-api-token' => ['*'],
         ]);
+        config()->set('ez-ecommerce.checkout.public_payment_methods', [
+            'stripe', 'paypal', 'telr', 'manual', 'fake', 'null',
+        ]);
     }
 
     protected function defineDatabaseMigrations(): void

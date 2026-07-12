@@ -64,6 +64,7 @@ final class CheckoutController extends Controller
 
         $builder = $this->commerce->checkout()
             ->for($cart)
+            ->restrictPublicPaymentMethods()
             ->shippingMethod($validated['shipping_method'] ?? null)
             ->paymentMethod($validated['payment_method'] ?? null)
             ->customerIdentity($identity);

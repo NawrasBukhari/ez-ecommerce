@@ -3,6 +3,7 @@
 namespace EzEcommerce\Payments\Drivers;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Enums\RefundStatus;
 use EzEcommerce\Payments\Contracts\PaymentGateway;
 use EzEcommerce\Payments\Data\CapturePaymentData;
@@ -16,6 +17,9 @@ use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
+use EzEcommerce\Payments\Models\Payment;
+use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\Models\PaymentTransaction;
 use Stripe\StripeClient;
 
 final class StripePaymentGateway implements PaymentGateway
@@ -77,33 +81,57 @@ final class StripePaymentGateway implements PaymentGateway
 
         $intent = $this->client->paymentIntents->capture(
             $intentId,
-            ['amount_to_capture' => $data->amount->minorAmount],
+            $this->captureParams($data),
             $this->idempotencyOptions($data->attempt->idempotency_key, "capture:{$data->attempt->id}"),
         );
+
+        $chargeId = is_string($intent->latest_charge)
+            ? $intent->latest_charge
+            : (is_object($intent->latest_charge) ? ($intent->latest_charge->id ?? null) : null);
 
         return new PaymentResult(
             success: $intent->status === 'succeeded',
             status: PaymentStatus::Captured,
             amount: $data->amount,
-            externalId: $intent->id,
+            externalId: is_string($chargeId) ? $chargeId : $intent->id,
+            metadata: ['stripe_payment_intent_id' => $intent->id],
         );
     }
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $intentId = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
+        $intentId = $data->providerReference
+            ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null)
+            ?? $this->sessionPaymentIntentId($data->payment)
+            ?? $data->attempt->external_id
+            ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
+
+        if ($intentId === null || str_starts_with($intentId, 'ch_')) {
+            $intentId = $this->sessionPaymentIntentId($data->payment);
+        }
+
         if ($intentId === null) {
             throw PaymentOperationNotSupported::for('stripe', 'refund without payment_intent');
         }
 
-        $refund = $this->client->refunds->create([
-            'payment_intent' => $intentId,
-            'amount' => $data->amount->minorAmount,
-        ], $this->idempotencyOptions($data->attempt->idempotency_key, "refund:{$data->attempt->id}"));
+        $captureTransaction = $this->latestCaptureChargeId($data->payment);
+
+        $refundParams = $captureTransaction !== null
+            ? ['charge' => $captureTransaction, 'amount' => $data->amount->minorAmount]
+            : ['payment_intent' => $intentId, 'amount' => $data->amount->minorAmount];
+
+        $refund = $this->client->refunds->create(
+            $refundParams,
+            $this->idempotencyOptions($data->attempt->idempotency_key, "refund:{$data->attempt->id}"),
+        );
 
         return new RefundResult(
-            success: $refund->status === 'succeeded',
-            status: RefundStatus::Succeeded,
+            success: in_array($refund->status, ['succeeded', 'pending'], true),
+            status: match ($refund->status) {
+                'succeeded' => RefundStatus::Succeeded,
+                'pending', 'requires_action' => RefundStatus::Pending,
+                default => RefundStatus::Failed,
+            },
             amount: $data->amount,
             externalId: $refund->id,
         );
@@ -141,5 +169,48 @@ final class StripePaymentGateway implements PaymentGateway
         $idempotencyKey = $key !== null && $key !== '' ? $key : $fallback;
 
         return ['idempotency_key' => $idempotencyKey];
+    }
+
+    /** @return array<string, int|bool> */
+    private function captureParams(CapturePaymentData $data): array
+    {
+        $params = ['amount_to_capture' => $data->amount->minorAmount];
+        $remaining = $data->payment->amount_minor - $data->payment->captured_minor;
+
+        if ($data->amount->minorAmount < $remaining
+            && config('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false)) {
+            $params['final_capture'] = false;
+        }
+
+        return $params;
+    }
+
+    private function sessionPaymentIntentId(Payment $payment): ?string
+    {
+        $attempt = PaymentAttempt::query()
+            ->where('payment_id', $payment->id)
+            ->where('operation', 'create_session')
+            ->whereNotNull('external_id')
+            ->orderByDesc('id')
+            ->first();
+
+        $id = $attempt?->external_id;
+
+        return is_string($id) && str_starts_with($id, 'pi_') ? $id : null;
+    }
+
+    private function latestCaptureChargeId(Payment $payment): ?string
+    {
+        $transaction = PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('type', PaymentTransactionType::Capture)
+            ->where('status', 'succeeded')
+            ->whereNotNull('external_id')
+            ->orderByDesc('id')
+            ->first();
+
+        $id = $transaction?->external_id;
+
+        return is_string($id) && str_starts_with($id, 'ch_') ? $id : null;
     }
 }

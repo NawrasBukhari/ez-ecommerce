@@ -1,0 +1,196 @@
+<?php
+
+namespace EzEcommerce\Payments\Actions;
+
+use EzEcommerce\Core\Contracts\Clock;
+use EzEcommerce\Core\Enums\RefundStatus;
+use EzEcommerce\Payments\Data\GatewayWebhookEvent;
+use EzEcommerce\Payments\Data\WebhookRequestData;
+use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\PaymentGatewayRegistry;
+use EzEcommerce\Refunds\Actions\RefundPayment;
+use EzEcommerce\Refunds\Models\Refund;
+use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
+
+final class ReconcileRefund
+{
+    public function __construct(
+        private readonly Clock $clock,
+        private readonly PaymentGatewayRegistry $gateways,
+        private readonly RefundPayment $refundPayment,
+    ) {
+    }
+
+    public function isRefundEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'stripe' => in_array($eventType, [
+                'charge.refunded',
+                'refund.updated',
+            ], true),
+            'paypal' => in_array($eventType, [
+                'PAYMENT.CAPTURE.REFUNDED',
+                'PAYMENT.REFUND.COMPLETED',
+                'PAYMENT.REFUND.FAILED',
+            ], true),
+            'fake' => $eventType === 'payment.refunded',
+            default => false,
+        };
+    }
+
+    public function execute(WebhookRequestData $request): GatewayWebhookEvent
+    {
+        $gateway = $this->gateways->for($request->gateway);
+        $event = $gateway->parseWebhook($request);
+
+        if (! $this->isRefundEvent($request->gateway, $event->eventType)) {
+            return $event;
+        }
+
+        $existing = ProcessedGatewayEvent::query()
+            ->where('gateway', $request->gateway)
+            ->where('external_event_id', $event->eventId)
+            ->first();
+
+        if ($existing !== null && $existing->status === 'processed') {
+            return $event;
+        }
+
+        $attempt = $this->findRefundAttempt($event);
+        if ($attempt === null) {
+            return $event;
+        }
+
+        $refundId = $this->attemptMetadata($attempt)['refund_id'] ?? null;
+        if ($refundId === null) {
+            return $event;
+        }
+
+        $refund = Refund::query()->find((int) $refundId);
+        if ($refund === null) {
+            return $event;
+        }
+
+        $payment = $attempt->payment;
+        if ($payment === null) {
+            return $event;
+        }
+
+        $succeeded = $this->isSuccessfulRefundEvent($request->gateway, $event->eventType);
+
+        try {
+            DB::transaction(function () use ($request, $event, $attempt, $refund, $payment, $succeeded) {
+                $record = ProcessedGatewayEvent::query()
+                    ->where('gateway', $request->gateway)
+                    ->where('external_event_id', $event->eventId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($record !== null && $record->status === 'processed') {
+                    return;
+                }
+
+                if ($record === null) {
+                    $record = ProcessedGatewayEvent::query()->create([
+                        'gateway' => $request->gateway,
+                        'external_event_id' => $event->eventId,
+                        'event_type' => $event->eventType,
+                        'payload' => json_decode($request->payload, true, 512, JSON_THROW_ON_ERROR),
+                        'status' => 'processing',
+                        'processed_at' => $this->clock->now(),
+                    ]);
+                } else {
+                    $record->update(['status' => 'processing']);
+                }
+
+                if ($succeeded) {
+                    if ($refund->status === RefundStatus::Succeeded) {
+                        $record->update(['status' => 'processed', 'processed_at' => $this->clock->now()]);
+
+                        return;
+                    }
+
+                    $amountMinor = $event->amountMinor ?? $refund->amount_minor;
+                    $this->refundPayment->finalizeProviderRefund(
+                        $payment,
+                        $refund,
+                        $attempt,
+                        new \EzEcommerce\Payments\Data\RefundResult(
+                            success: true,
+                            status: RefundStatus::Succeeded,
+                            amount: \EzEcommerce\Core\Money\Money::fromMinor($amountMinor, $refund->currency),
+                            externalId: $event->transactionReference ?? $event->paymentReference,
+                        ),
+                    );
+                } elseif ($this->isFailedRefundEvent($request->gateway, $event->eventType)) {
+                    $refund->update(['status' => RefundStatus::Failed]);
+                    $attempt->update(['status' => 'failed']);
+                }
+
+                $record->update([
+                    'status' => 'processed',
+                    'processed_at' => $this->clock->now(),
+                    'last_error' => null,
+                ]);
+            });
+        } catch (UniqueConstraintViolationException) {
+            return $event;
+        }
+
+        return $event;
+    }
+
+    private function findRefundAttempt(GatewayWebhookEvent $event): ?PaymentAttempt
+    {
+        foreach ([$event->transactionReference, $event->paymentReference] as $reference) {
+            if (! is_string($reference) || $reference === '') {
+                continue;
+            }
+
+            $attempt = PaymentAttempt::query()
+                ->where('operation', 'refund')
+                ->where('external_id', $reference)
+                ->first();
+
+            if ($attempt !== null) {
+                return $attempt;
+            }
+
+            $attempt = PaymentAttempt::query()
+                ->where('operation', 'refund')
+                ->where('idempotency_key', $reference)
+                ->first();
+
+            if ($attempt !== null) {
+                return $attempt;
+            }
+        }
+
+        return null;
+    }
+
+    private function isSuccessfulRefundEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'stripe' => in_array($eventType, ['charge.refunded', 'refund.updated'], true),
+            'paypal' => in_array($eventType, ['PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.REFUND.COMPLETED'], true),
+            'fake' => $eventType === 'payment.refunded',
+            default => false,
+        };
+    }
+
+    private function isFailedRefundEvent(string $gateway, string $eventType): bool
+    {
+        return $gateway === 'paypal' && $eventType === 'PAYMENT.REFUND.FAILED';
+    }
+
+    /** @return array<string, mixed> */
+    private function attemptMetadata(PaymentAttempt $attempt): array
+    {
+        return $attempt->request_metadata instanceof \ArrayObject
+            ? $attempt->request_metadata->getArrayCopy()
+            : (array) ($attempt->request_metadata ?? []);
+    }
+}

@@ -72,8 +72,14 @@ final class FinalizeAcceptedPayment
             $this->commitReservation->executeForOrder($order);
             $this->confirmOrderOnPaymentAccepted->execute($order);
 
-            if (! $wasFullyCaptured) {
+            $metadata = $order->metadata instanceof \ArrayObject
+                ? $order->metadata->getArrayCopy()
+                : (array) ($order->metadata ?? []);
+
+            if (! $wasFullyCaptured && ! ($metadata['order_paid_dispatched'] ?? false)) {
                 Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+                $metadata['order_paid_dispatched'] = true;
+                $order->update(['metadata' => $metadata]);
             }
 
             return;

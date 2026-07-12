@@ -6,6 +6,10 @@ use EzEcommerce\Core\Models\CommerceModel;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string $currency
+ * @property string|null $code
+ */
 class PriceList extends CommerceModel
 {
     protected static bool $usesPublicId = true;

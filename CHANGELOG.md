@@ -4,6 +4,31 @@ All notable changes to `ez-ecommerce/ez-ecommerce` are documented in this file.
 
 ## Unreleased
 
+### Added (production hardening sprint)
+
+- Required `Idempotency-Key` on API `cancel`, `complete`, and `fulfill` order endpoints.
+- `checkout.public_payment_methods` config — public checkout rejects disallowed payment methods (default: stripe, paypal, telr).
+- `PriceListEligibility` contract + `DefaultPriceListEligibility`; validates `price_list_id` on calculate/checkout.
+- Address-aware cart quote: `POST /cart/{id}/calculate` accepts `shipping_address`; `totals_hash` includes address + price list.
+- `ReconcileRefund` action + inbound refund webhook routing.
+- PostgreSQL CI hardening job (`postgres-hardening`).
+- `RegistersCommerceApiExceptions` — maps version/totals/idempotency conflicts to 409/422.
+- Stripe partial capture policy (`allow_partial_capture` + `final_capture`).
+- `order_paid_dispatched` metadata guard against duplicate `OrderPaid` events.
+- Outbound `DeliverWebhookJob` throws on non-2xx responses.
+- `commerce:reconcile-payments --list-stale` for operator visibility.
+- Cart version atomic bumps via `BumpsCartVersionAtomically` trait.
+- 102 Pest tests across 13 feature files.
+
+### Fixed (production hardening sprint)
+
+- Post-capture webhook idempotency (`ApplyPaymentCapture` duplicate/fully-captured ordering).
+- Stripe ledger refs normalized (`ch_*` capture refs; refunds use charge or payment_intent).
+- `IdempotencyStore` PostgreSQL `UniqueConstraintViolationException` recovery outside transaction.
+- `RetryPaymentSession` reuses keys and blocks unsafe pending retries.
+- Pending Stripe refunds no longer marked failed immediately.
+- Telr capture rejected before PSP call when gateway lacks capture capability.
+
 ### Added
 
 - Headless commerce engine for Laravel 11–13 with modular providers (Catalog, Pricing, Inventory, Cart, Checkout, Orders, Payments, Fulfillment, Refunds, Returns, Discounts, Subscriptions, Marketplace, B2B, Stores, Webhooks).

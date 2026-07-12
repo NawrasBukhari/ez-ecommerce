@@ -4,6 +4,9 @@ namespace EzEcommerce\Webhooks\Inbound\Models;
 
 use EzEcommerce\Core\Models\CommerceModel;
 
+/**
+ * @property string $status
+ */
 class ProcessedGatewayEvent extends CommerceModel
 {
     protected $table = 'commerce_processed_gateway_events';

@@ -9,6 +9,10 @@ use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
 
 return [
 
+    'checkout' => [
+        'public_payment_methods' => ['stripe', 'paypal', 'telr'],
+    ],
+
     'currency' => [
         'default' => env('COMMERCE_CURRENCY', 'AED'),
         'rounding' => 'half_up',
@@ -16,6 +20,7 @@ return [
 
     'pricing' => [
         'precedence' => ['customer', 'customer_group', 'price_list', 'sale', 'base'],
+        'allowed_price_list_codes' => [],
         'tax_after_discounts' => true,
         'shipping_taxable' => true,
     ],
@@ -35,6 +40,7 @@ return [
             'stripe' => [
                 'secret' => env('STRIPE_SECRET'),
                 'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+                'allow_partial_capture' => false,
             ],
             'paypal' => [
                 'client_id' => env('PAYPAL_CLIENT_ID'),

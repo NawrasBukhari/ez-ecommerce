@@ -68,9 +68,9 @@ final class CartManager
         return $this->calculateCartTotals->execute($cart, $shippingMethod, $shippingAddress, $expectedVersion);
     }
 
-    public function totalsHash(Cart $cart, ?string $shippingMethod = null): string
+    public function totalsHash(Cart $cart, ?string $shippingMethod = null, ?Address $shippingAddress = null): string
     {
-        return $this->calculateCartTotals->totalsHash($cart, $shippingMethod);
+        return $this->calculateCartTotals->totalsHash($cart, $shippingMethod, $shippingAddress);
     }
 
     public function merge(Cart $guestCart, Cart $customerCart): Cart

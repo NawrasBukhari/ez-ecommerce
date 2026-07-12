@@ -1,24 +1,6 @@
 parameters:
 	ignoreErrors:
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/AddItemToCart.php
-
-		-
-			message: '#^Parameter \$customer of class EzEcommerce\\Pricing\\Data\\PricingContext constructor expects EzEcommerce\\Customers\\Models\\Customer\|null, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Cart/Actions/AddItemToCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/ApplyDiscountCode.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Discounts\\Models\\Discount\:\:\$code\.$#'
 			identifier: property.notFound
 			count: 2
@@ -67,48 +49,6 @@ parameters:
 			path: src/Cart/Actions/ApplyDiscountCode.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 5
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$discount_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$grand_total_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$shipping_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$subtotal_minor\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$tax_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$affects_total\.$#'
 			identifier: property.notFound
 			count: 1
@@ -116,12 +56,6 @@ parameters:
 
 		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$amount_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$customerGroup\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Cart/Actions/CalculateCartTotals.php
@@ -184,12 +118,6 @@ parameters:
 			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,Illuminate\\Database\\Eloquent\\Model\>\:\:map\(\) contains unresolvable type\.$#'
 			identifier: argument.unresolvableType
 			count: 2
-			path: src/Cart/Actions/CalculateCartTotals.php
-
-		-
-			message: '#^Parameter \$customer of class EzEcommerce\\Pricing\\Data\\PricingContext constructor expects EzEcommerce\\Customers\\Models\\Customer\|null, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 1
 			path: src/Cart/Actions/CalculateCartTotals.php
 
 		-
@@ -277,18 +205,6 @@ parameters:
 			path: src/Catalog/Models/ProductVariant.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Checkout/Actions/PlaceOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Checkout/Actions/PlaceOrder.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$currency\.$#'
 			identifier: property.notFound
 			count: 1
@@ -359,12 +275,6 @@ parameters:
 			identifier: function.impossibleType
 			count: 1
 			path: src/Core/Support/CanonicalJson.php
-
-		-
-			message: '#^Method EzEcommerce\\Customers\\DefaultCustomerResolver\:\:resolve\(\) should return EzEcommerce\\Customers\\Models\\Customer\|null but returns Illuminate\\Database\\Eloquent\\Model\|null\.$#'
-			identifier: return.type
-			count: 1
-			path: src/Customers/DefaultCustomerResolver.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\OrderItem\:\:\$quantity\.$#'
@@ -589,48 +499,6 @@ parameters:
 			path: src/Orders/Actions/ConfirmOrderOnPaymentAccepted.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$currency\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$discount_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$fee_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$grand_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$shipping_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$subtotal_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Cart\\Models\\Cart\:\:\$tax_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CreateOrderFromCart.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Customers\\Models\\Address\:\:\$metadata\.$#'
 			identifier: property.notFound
 			count: 1
@@ -797,12 +665,6 @@ parameters:
 			identifier: property.notFound
 			count: 1
 			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Webhooks\\Inbound\\Models\\ProcessedGatewayEvent\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Actions/ReconcilePayment.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'

@@ -40,17 +40,21 @@ final class ApplyPaymentCapture
                 throw new InvalidArgumentException('Capture currency does not match payment currency.');
             }
 
-            $remaining = $locked->amount_minor - $locked->captured_minor;
-            if ($amountMinor > $remaining) {
-                throw new InvalidArgumentException("Capture amount [{$amountMinor}] exceeds remaining [{$remaining}].");
-            }
-
             if ($externalId !== null && PaymentTransaction::query()
                 ->where('payment_id', $locked->id)
                 ->where('type', PaymentTransactionType::Capture)
                 ->where('external_id', $externalId)
                 ->exists()) {
                 return $locked->fresh();
+            }
+
+            if ($locked->captured_minor >= $locked->amount_minor) {
+                return $locked->fresh();
+            }
+
+            $remaining = $locked->amount_minor - $locked->captured_minor;
+            if ($amountMinor > $remaining) {
+                throw new InvalidArgumentException("Capture amount [{$amountMinor}] exceeds remaining [{$remaining}].");
             }
 
             PaymentTransaction::query()->create([

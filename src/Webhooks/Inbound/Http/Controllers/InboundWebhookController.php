@@ -3,10 +3,12 @@
 namespace EzEcommerce\Webhooks\Inbound\Http\Controllers;
 
 use EzEcommerce\Payments\Actions\ReconcilePayment;
+use EzEcommerce\Payments\Actions\ReconcileRefund;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
+use EzEcommerce\Payments\PaymentGatewayRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -16,7 +18,9 @@ use Stripe\Webhook;
 final class InboundWebhookController extends Controller
 {
     public function __construct(
+        private readonly PaymentGatewayRegistry $gateways,
         private readonly ReconcilePayment $reconcilePayment,
+        private readonly ReconcileRefund $reconcileRefund,
     ) {
     }
 
@@ -27,11 +31,17 @@ final class InboundWebhookController extends Controller
         $payload = $request->getContent();
         $this->verifyInboundAccess($request, $gateway, $payload);
 
-        $event = $this->reconcilePayment->execute(new WebhookRequestData(
+        $requestData = new WebhookRequestData(
             gateway: $gateway,
             payload: $payload,
             headers: $request->headers->all(),
-        ));
+        );
+
+        $parsed = $this->gateways->for($gateway)->parseWebhook($requestData);
+
+        $event = $this->reconcileRefund->isRefundEvent($gateway, $parsed->eventType)
+            ? $this->reconcileRefund->execute($requestData)
+            : $this->reconcilePayment->execute($requestData);
 
         return response()->json([
             'received' => true,

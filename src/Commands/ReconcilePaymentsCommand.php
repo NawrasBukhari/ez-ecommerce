@@ -14,6 +14,7 @@ class ReconcilePaymentsCommand extends Command
     protected $signature = 'commerce:reconcile-payments
         {attempt? : Payment attempt ID to reconcile}
         {--list : List capture attempts requiring reconciliation}
+        {--list-stale : List stale pending capture attempts}
         {--retry : Retry an unknown capture using the same idempotency key}
         {--mark-succeeded : Record a provider-confirmed capture in the ledger}
         {--mark-failed : Mark an unknown capture as failed}
@@ -25,7 +26,34 @@ class ReconcilePaymentsCommand extends Command
 
     public function handle(ReconcileCaptureAttempt $reconcileCaptureAttempt): int
     {
-        if ($this->option('list') || $this->argument('attempt') === null) {
+        if ($this->option('list') || $this->option('list-stale') || $this->argument('attempt') === null) {
+            if ($this->option('list-stale')) {
+                $attempts = PaymentAttempt::query()
+                    ->where('operation', 'capture')
+                    ->where('status', 'pending')
+                    ->where('updated_at', '<', now()->subMinutes(15))
+                    ->orderBy('id')
+                    ->get();
+
+                if ($attempts->isEmpty()) {
+                    $this->components->info('No stale pending capture attempts.');
+
+                    return self::SUCCESS;
+                }
+
+                $this->table(
+                    ['id', 'payment_id', 'idempotency_key', 'updated_at'],
+                    $attempts->map(fn (PaymentAttempt $attempt) => [
+                        $attempt->id,
+                        $attempt->payment_id,
+                        $attempt->idempotency_key,
+                        $attempt->updated_at,
+                    ]),
+                );
+
+                return self::SUCCESS;
+            }
+
             $attempts = PaymentAttempt::query()
                 ->where('operation', 'capture')
                 ->where('status', 'unknown')

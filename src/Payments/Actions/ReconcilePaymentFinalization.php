@@ -43,7 +43,7 @@ final class ReconcilePaymentFinalization
             throw new RuntimeException("Payment [{$payment->id}] is not captured.");
         }
 
-        $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment);
+        $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment, wasFullyCaptured: true);
 
         /** @var Order $order */
         $order = $payment->order;

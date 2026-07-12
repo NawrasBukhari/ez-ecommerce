@@ -173,6 +173,19 @@ final class RefundPayment
 
     private function finalizeRefundAttempt(Payment $payment, Refund $refund, PaymentAttempt $attempt, RefundResult $result): Refund
     {
+        if ($result->status === RefundStatus::Pending) {
+            $refund->update([
+                'status' => RefundStatus::Pending,
+                'external_id' => $result->externalId,
+            ]);
+            $attempt->update([
+                'status' => 'pending',
+                'external_id' => $result->externalId,
+            ]);
+
+            return $refund->fresh();
+        }
+
         $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
         if (! $result->success) {

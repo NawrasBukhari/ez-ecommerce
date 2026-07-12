@@ -5,12 +5,18 @@ namespace EzEcommerce\Api\Http\Middleware;
 use Closure;
 use EzEcommerce\Api\Http\Middleware\Concerns\ValidatesCartExpiry;
 use EzEcommerce\Cart\Models\Cart;
+use EzEcommerce\Pricing\Actions\ResolveCartPriceList;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class ValidateCheckoutCartAccess
 {
     use ValidatesCartExpiry;
+
+    public function __construct(
+        private readonly ResolveCartPriceList $resolveCartPriceList,
+    ) {
+    }
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -29,6 +35,8 @@ final class ValidateCheckoutCartAccess
         }
 
         if ($request->filled('price_list_id')) {
+            $this->resolveCartPriceList->for($cart, $request->string('price_list_id'));
+
             $metadata = $cart->metadata instanceof \ArrayObject
                 ? $cart->metadata->getArrayCopy()
                 : (array) ($cart->metadata ?? []);

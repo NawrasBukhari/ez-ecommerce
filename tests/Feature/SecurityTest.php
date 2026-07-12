@@ -59,6 +59,35 @@ it('rejects checkout without guest cart token', function () {
     ])->assertForbidden();
 });
 
+it('rejects disallowed payment method on public checkout', function () {
+    config()->set('ez-ecommerce.checkout.public_payment_methods', ['stripe', 'paypal', 'telr']);
+
+    ['variant' => $variant] = $this->createProductWithVariant();
+    $guest = $this->postJson('/api/ez-commerce/v1/cart/guest', ['currency' => 'AED']);
+    $cartId = $guest->json('id') ?? $guest->json('data.id');
+    $token = $guest->json('guest_token');
+
+    $this->withHeader('X-Guest-Cart-Token', $token)
+        ->postJson("/api/ez-commerce/v1/cart/{$cartId}/items", [
+            'variant_id' => $variant->public_id,
+            'quantity' => 1,
+        ])->assertCreated();
+
+    $calculate = $this->withHeader('X-Guest-Cart-Token', $token)
+        ->postJson("/api/ez-commerce/v1/cart/{$cartId}/calculate", ['shipping_method' => 'flat'])
+        ->assertOk();
+
+    $this->withHeaders([
+        'X-Guest-Cart-Token' => $token,
+        'Idempotency-Key' => 'blocked-method-'.uniqid(),
+    ])->postJson('/api/ez-commerce/v1/checkout', [
+        'cart_id' => $cartId,
+        'shipping_method' => 'flat',
+        'payment_method' => 'manual',
+        'expected_totals_hash' => $calculate->json('totals_hash'),
+    ])->assertStatus(422);
+});
+
 it('rejects paypal webhook without shared secret when webhook id unset', function () {
     config()->set('ez-ecommerce.drivers.payment.paypal.webhook_id', null);
     config()->set('ez-ecommerce.inbound_webhooks.shared_secret', 'webhook-secret');

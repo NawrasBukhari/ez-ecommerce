@@ -4,6 +4,7 @@ use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Facades\EzEcommerce;
+use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Tests\Support\ResolvesCartApiIds;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
 use EzEcommerce\Tests\Support\UsesCommerceApi;
@@ -81,7 +82,14 @@ it('retries payment session via api', function () {
 
     $result = placeCheckoutOrder($cart, 'retry-'.uniqid());
 
-    $response = $this->withHeaders($this->commerceApiHeaders())
+    PaymentAttempt::query()
+        ->where('payment_id', $result->payment->id)
+        ->where('operation', 'create_session')
+        ->update(['status' => 'failed_retryable']);
+
+    $response = $this->withHeaders(array_merge($this->commerceApiHeaders(), [
+        'Idempotency-Key' => 'retry-'.uniqid(),
+    ]))
         ->postJson("/api/ez-commerce/v1/orders/{$result->order->public_id}/retry-payment")
         ->assertOk()
         ->json();
