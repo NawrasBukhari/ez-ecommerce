@@ -33,8 +33,8 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Cart** | `removeDiscount()` on manager + `DELETE /cart/{id}/discount` |
 | **Subscriptions** | `BillSubscriptionPeriod` on `commerce:renew-subscriptions` |
 | **Webhooks** | Inbound routes, outbound outbox + delivery jobs |
-| **Payments** | Telr refund HTTP call; `POST /orders/{id}/retry-payment` |
-| **Tests** | 89 Pest tests across 13 feature files |
+| **Payments** | Telr refund HTTP call; `POST /orders/{id}/retry-payment`; capture/refund idempotency; reconcile commands |
+| **Tests** | 97 Pest tests across 18 feature files |
 
 ### Shipped (backlog implementation)
 
@@ -49,7 +49,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Cart** | Expiry enforcement, `price_list_id` on calculate/checkout |
 | **Shipping/Tax** | `GET /shipping-methods`, weight shipping + jurisdiction tax drivers |
 | **Webhooks** | Delivery retry, more outbound events, inbound event log API |
-| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records` |
+| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records`, `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations` |
 
 ### Still not built (do not assume)
 
@@ -83,7 +83,7 @@ src/
   Cart/             CartManager + cart actions (single ApplyDiscountCode in Cart/Actions)
   Catalog/          Product, ProductVariant, Category, contracts
   Checkout/         CheckoutManager, CheckoutBuilder, PlaceOrder
-  Commands/         commerce:install, release reservations, renew subscriptions, purge carts/idempotency
+  Commands/         commerce:install, purge, renew, reconcile-payments/refunds/finalizations
   Core/             Money, Clock, Idempotency, enums, events, OutboxMessage
   Customers/        Customer, Address, CustomerResolver
   Discounts/        Discount model only (cart actions live in Cart/)
@@ -102,7 +102,7 @@ src/
   Webhooks/         Inbound controller + outbound dispatch/delivery
 routes/api.php      Versioned REST API
 database/migrations commerce_* tables
-tests/Feature/      81 Pest tests — see README test matrix
+tests/Feature/      97 Pest tests — see README test matrix
 ```
 
 ---

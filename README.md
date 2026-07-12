@@ -123,6 +123,8 @@ These paths are implemented, wired, and covered by at least one test on the happ
 | Orders | Snapshots on line items | Immutable product data at purchase time |
 | Inventory | Reserve → commit on payment | Signed movements; race-safe expiry release |
 | Manual capture | `CapturePayment` action / API | After `manual` gateway pending session |
+| Payment reconciliation | `commerce:reconcile-payments` / `commerce:reconcile-refunds` | Operator tools for `unknown` PSP attempts |
+| Order finalization recovery | `commerce:reconcile-finalizations` | Retry inventory commit after capture succeeded |
 | Fulfillment | `OrderManager::fulfill()` / API | Updates fulfillment projection |
 | Refunds | `RefundPayment` / API | Financial refund only (not returns) |
 | Returns | Actions: create → receive → restock | Separate from refund |
@@ -179,6 +181,9 @@ php artisan commerce:release-expired-reservations
 php artisan commerce:renew-subscriptions
 php artisan commerce:purge-expired-carts
 php artisan commerce:purge-idempotency-records
+php artisan commerce:reconcile-payments --list
+php artisan commerce:reconcile-refunds --list
+php artisan commerce:reconcile-finalizations --list
 ```
 
 ---
@@ -481,7 +486,40 @@ Publish config: `php artisan vendor:publish --tag=ez-ecommerce-config`
 php artisan commerce:install                      # Publish config + translations
 php artisan commerce:release-expired-reservations # Release stale inventory holds
 php artisan commerce:renew-subscriptions          # Renew periods + bill via BillSubscriptionPeriod
+php artisan commerce:purge-expired-carts          # Delete expired guest carts
+php artisan commerce:purge-idempotency-records    # Prune old idempotency rows
 ```
+
+### Payment operator runbook
+
+When a PSP call times out or returns an ambiguous error, the ledger records the attempt as `unknown` and blocks conflicting retries until an operator resolves it.
+
+**Unknown captures** (`commerce:reconcile-payments`):
+
+```bash
+php artisan commerce:reconcile-payments --list
+php artisan commerce:reconcile-payments {attempt} --retry
+php artisan commerce:reconcile-payments {attempt} --mark-succeeded --amount=1000 --currency=AED --external-id=ch_xxx
+php artisan commerce:reconcile-payments {attempt} --mark-failed
+```
+
+**Unknown refunds** (`commerce:reconcile-refunds`):
+
+```bash
+php artisan commerce:reconcile-refunds --list
+php artisan commerce:reconcile-refunds {attempt} --retry
+php artisan commerce:reconcile-refunds {attempt} --mark-succeeded --external-id=re_xxx
+php artisan commerce:reconcile-refunds {attempt} --mark-failed
+```
+
+**Captured but not finalized** (`commerce:reconcile-finalizations`) — inventory commit or order confirmation failed after capture:
+
+```bash
+php artisan commerce:reconcile-finalizations --list
+php artisan commerce:reconcile-finalizations {payment} --complete
+```
+
+`{attempt}` and `{payment}` are numeric internal IDs from the `--list` output.
 
 **Recommended scheduler** (in your app's `routes/console.php`):
 
@@ -544,6 +582,7 @@ EzEcommerce::morphMap([
 composer test
 # or
 vendor/bin/pest
+vendor/bin/pest --group=hardening   # MySQL concurrency / payment correctness suite
 vendor/bin/pint --dirty
 vendor/bin/phpstan analyse
 ```
@@ -552,12 +591,13 @@ vendor/bin/phpstan analyse
 
 ## Test coverage honesty
 
-**81 tests. 11 files.** Core commerce, API, security, schema/relations, backlog implementation.
+**97 tests. 18 files.** Core commerce, API, security, schema/relations, backlog implementation, payment hardening.
 
 | Test file | Coverage |
 |-----------|----------|
 | `CommerceFlowTest` | Boot, features, cart→checkout, idempotency, money |
 | `HardeningTest` | Capture, fulfill, refund, idempotency replay, OOS, null gateway |
+| `CorrectnessHardeningTest` | Unknown captures/refunds, `OrderPaid` transitions, provider-confirmed ledger, retry snapshots |
 | `ApiTest` | Products, guest cart, checkout validation |
 | `SecurityTest` | Fail-closed API, scopes, checkout token, Stripe/PayPal webhook auth |
 | `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions |

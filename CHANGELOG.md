@@ -36,7 +36,13 @@ All notable changes to `ez-ecommerce/ez-ecommerce` are documented in this file.
 - PayPal native webhook signature verification when `PAYPAL_WEBHOOK_ID` is set.
 - Boolean env parsing for `allow_unauthenticated` / `allow_unsigned`.
 
-### Added (backlog sprint)
+### Added (reconciliation & hardening)
+
+- Operator commands: `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations` for unknown PSP attempts and post-capture finalization recovery.
+- Capture/refund idempotency keys on Stripe and PayPal; unknown attempts block conflicting retries until reconciled.
+- `CorrectnessHardeningTest` suite (`--group=hardening`) for payment correctness on MySQL.
+- `testbench.yaml` for Larastan/static analysis in package development.
+
 
 - `POST /customers/{id}/cart`, catalog write, inventory admin, vendor payouts API.
 - `commerce_vendor_payouts` table + `PayVendorCommissions` action.
