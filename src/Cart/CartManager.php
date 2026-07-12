@@ -7,6 +7,7 @@ use EzEcommerce\Cart\Actions\ApplyDiscountCode;
 use EzEcommerce\Cart\Actions\CalculateCartTotals;
 use EzEcommerce\Cart\Actions\CreateGuestCart;
 use EzEcommerce\Cart\Actions\MergeCarts;
+use EzEcommerce\Cart\Actions\RemoveDiscountCode;
 use EzEcommerce\Cart\Actions\RemoveCartItem;
 use EzEcommerce\Cart\Actions\UpdateCartItem;
 use EzEcommerce\Cart\Models\Cart;
@@ -24,6 +25,7 @@ final class CartManager
         private readonly ApplyDiscountCode $applyDiscountCode,
         private readonly CalculateCartTotals $calculateCartTotals,
         private readonly MergeCarts $mergeCarts,
+        private readonly RemoveDiscountCode $removeDiscountCode,
     ) {}
 
     /** @return array{cart: Cart, guest_token: string} */
@@ -65,5 +67,10 @@ final class CartManager
     public function merge(Cart $guestCart, Cart $customerCart): Cart
     {
         return $this->mergeCarts->execute($guestCart, $customerCart);
+    }
+
+    public function removeDiscount(Cart $cart, ?string $code = null, ?int $expectedVersion = null): Cart
+    {
+        return $this->removeDiscountCode->execute($cart, $code, $expectedVersion);
     }
 }

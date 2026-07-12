@@ -10,6 +10,7 @@ final class RenewSubscription
 {
     public function __construct(
         private readonly Clock $clock,
+        private readonly BillSubscriptionPeriod $billSubscriptionPeriod,
     ) {}
 
     public function execute(Subscription $subscription): Subscription
@@ -19,6 +20,10 @@ final class RenewSubscription
 
         if ($subscription->current_period_end > $now) {
             return $subscription;
+        }
+
+        if ((int) $subscription->plan->amount_minor > 0) {
+            $this->billSubscriptionPeriod->execute($subscription);
         }
 
         $plan = $subscription->plan;

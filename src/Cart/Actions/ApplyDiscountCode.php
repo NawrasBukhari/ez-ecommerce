@@ -41,7 +41,8 @@ final class ApplyDiscountCode
         $subtotalMinor = $cart->items->sum(fn ($item) => $item->unit_price_minor * $item->quantity);
 
         $amountMinor = match ($discount->type) {
-            'fixed' => -abs((int) $discount->value),
+            'fixed' => -min(abs((int) $discount->value), $subtotalMinor),
+            'percent' => -(int) round($subtotalMinor * abs((int) $discount->value) / 100),
             'percentage' => -(int) round($subtotalMinor * abs((int) $discount->value) / 10000),
             default => throw new RuntimeException("Unsupported discount type [{$discount->type}]."),
         };
