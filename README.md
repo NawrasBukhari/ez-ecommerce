@@ -2,6 +2,8 @@
 
 A modular, headless e-commerce engine for Laravel.
 
+*No storefront included. That's a feature. Your designer can argue with CSS; this package argues with inventory.*
+
 ## Origin story
 
 This package was **vibe-coded by one engineer** — me — with architectural peer review from two friends who technically do not exist on payroll: **ChatGPT 5.5 High** and **Claude Opus 4.8**.
@@ -52,13 +54,15 @@ What you’re holding is the result: a real Laravel package with orders, invento
 
 ## Requirements
 
+You need PHP, Laravel, and a database. Shocking, we know.
+
 | Requirement | Version |
 |-------------|---------|
 | PHP | 8.2+ |
 | Laravel | 11, 12, or 13 |
 | Database | MySQL, PostgreSQL, or SQLite |
 
-Optional payment SDKs:
+Optional payment SDKs (install only if you enjoy talking to banks):
 
 ```powershell
 composer require stripe/stripe-php
@@ -69,6 +73,8 @@ composer require paypal/paypal-checkout-sdk
 
 ## Installation
 
+Three commands. If this breaks, it's either Composer, the universe, or that one `.env` typo you swear isn't there.
+
 ```powershell
 composer require ez-ecommerce/ez-ecommerce
 php artisan commerce:install
@@ -76,9 +82,9 @@ php artisan migrate
 ```
 
 - `commerce:install` publishes **config** and **translations**.
-- Migrations load from the package automatically. There is **no** `commerce:migrate` — the host app runs `php artisan migrate` like any other package.
+- Migrations load from the package automatically. There is **no** `commerce:migrate` — the host app runs `php artisan migrate` like any other package. We resisted the urge to invent a fourth artisan command. You're welcome.
 
-Copy variables from [`.env.example`](.env.example). Minimum for local dev:
+Copy variables from [`.env.example`](.env.example). Minimum for local dev (do not ship `manual` + `ALLOW_UNAUTHENTICATED=true` to prod unless your risk appetite is… adventurous):
 
 ```dotenv
 COMMERCE_CURRENCY=AED
@@ -94,6 +100,8 @@ See [Configuration](#configuration) for Stripe, PayPal, Telr, scoped API tokens,
 ---
 
 ## Quick start (PHP)
+
+From zero to order in one screenful. Use a **stable** idempotency key in prod — `uniqid()` is for demos, not for the checkout button your CEO double-clicks.
 
 ```php
 use EzEcommerce\Facades\EzEcommerce;
@@ -118,13 +126,13 @@ $payment = $result->payment;
 $status  = $result->status; // CheckoutStatus enum
 ```
 
-For `manual` payments, capture after fulfillment review via `CapturePayment` or `POST /orders/{id}/capture`.
+For `manual` payments, capture after fulfillment review via `CapturePayment` or `POST /orders/{id}/capture`. Yes, you have to *decide* to take the money. Revolutionary.
 
 ---
 
 ## Quick start (REST API)
 
-Base path: `/api/ez-commerce/v1` (configurable).
+Base path: `/api/ez-commerce/v1` (configurable). Lose the `X-Guest-Cart-Token` and the cart ghosts you. Literally — 403.
 
 ```http
 POST /api/ez-commerce/v1/cart/guest
@@ -163,13 +171,13 @@ Idempotency-Key: <stable-key>
 }
 ```
 
-Guest cart auth is checked **before** any cart mutation (including optional `price_list_id` on checkout).
+Guest cart auth is checked **before** any cart mutation (including optional `price_list_id` on checkout). We learned this the hard way so you don't have to.
 
 ---
 
 ## Production readiness
 
-Honest tiers as of the latest hardening sprint:
+Honest tiers as of the latest hardening sprint. *"Prototype"* means "works in tests and my Stripe sandbox"; *"Strong beta"* means "I'd deploy it before lunch, but I'd eat lunch first."
 
 | Tier | Status | Notes |
 |------|--------|-------|
@@ -183,11 +191,13 @@ Before treating payments as production-ready:
 
 1. Run `vendor/bin/pest --group=hardening` on **MySQL** (CI does this).
 2. Configure real webhook secrets and API tokens (never `COMMERCE_API_ALLOW_UNAUTHENTICATED=true` in prod).
-3. Exercise operator commands for your PSP (`commerce:reconcile-*`).
+3. Exercise operator commands for your PSP (`commerce:reconcile-*`). Think of them as commerce therapy for when the network blinks mid-capture.
 
 ---
 
 ## What works today
+
+The boring stuff that actually ships boxes (or digital goods, we're not judging).
 
 ### Core commerce
 
@@ -209,8 +219,8 @@ Before treating payments as production-ready:
 ### Pricing
 
 - `DefaultPriceResolver`: **customer → customer_group → price_list → sale → base**
-- All money in **integer minor units** (`brick/money`)
-- `Purchasable` has no `price()` — always resolve via `PriceResolver`
+- All money in **integer minor units** (`brick/money`) — floats are for latitude, not ledgers
+- `Purchasable` has no `price()` — always resolve via `PriceResolver`. We will die on this hill. Politely.
 
 ### Optional modules (enable in config)
 
@@ -223,22 +233,24 @@ Before treating payments as production-ready:
 | Outbound webhooks | Outbox + signed delivery jobs | `features.outbound_webhooks` = `false` |
 | Inbound webhooks | `POST /webhooks/{gateway}` | Always registered when API enabled |
 
-`features.api` defaults to `true`. Disabling a flag does not skip migrations.
+`features.api` defaults to `true`. Disabling a flag does not skip migrations — the tables exist whether you use them or not, like gym membership.
 
 ---
 
 ## What is not ready
 
-- **Storefront / admin UI** — headless only; you build the front end.
+The honest "please don't `@` me on GitHub about this" list:
+
+- **Storefront / admin UI** — headless only; you build the front end. We sell engines, not paint jobs.
 - **Catalog update/delete API** — create + read only.
 - **Refund webhook reconciliation** — async PSP refund events not fully wired.
 - **Outbound webhook delivery guarantees** — host must run queue workers; retries need hardening.
 - **Automated bank/PSP payouts** — payout API records commissions as paid.
 - **PostgreSQL CI job** — supported by schema, not in CI matrix yet.
 - **Multi-process concurrency tests** — sequential Pest only.
-- **`currency.rounding` config** — defined, unused.
+- **`currency.rounding` config** — defined, unused. Schrödinger's setting.
 
-`OrderManager::fulfill()` is **not** on the `EzEcommerce` facade — use DI or the API.
+`OrderManager::fulfill()` is **not** on the `EzEcommerce` facade — use DI or the API. We hid fulfill on purpose so you wouldn't one-line your way into shipping unpaid orders. You're welcome. Again.
 
 ---
 
@@ -261,8 +273,10 @@ Your App (API/UI)
 
 ### Design rules
 
-1. **Payments never run inside DB transactions.**
-2. **Refunds ≠ returns ≠ restock** — three separate workflows.
+*Break these and the tests will find you. Eventually. Maybe at 2 AM.*
+
+1. **Payments never run inside DB transactions.** (Rule #1 exists because someone — not naming names — almost did.)
+2. **Refunds ≠ returns ≠ restock** — three separate workflows. Conflating them is how you refund a sofa and restock a feeling.
 3. **Checkout is idempotent** — stable `Idempotency-Key` / `idempotencyKey`.
 4. **Money is integers** — minor units only.
 5. **Morph aliases** (`commerce_product_variant`) — not FQCNs in polymorphic columns.
@@ -272,6 +286,8 @@ Your App (API/UI)
 ---
 
 ## Facade & managers
+
+Your cheat sheet. `orders()` looks up orders; it does not fulfill them. Fulfillment is a separate ritual.
 
 ```php
 EzEcommerce::cart()       // CartManager
@@ -300,6 +316,8 @@ EzEcommerce::checkout()->for($cart)
 
 **Prefix:** `api/ez-commerce/v1`
 
+*Headless means you bring the HTML. We bring the HTTP that doesn't embarrass you in production.*
+
 ### Authentication
 
 | Routes | Auth |
@@ -310,7 +328,9 @@ EzEcommerce::checkout()->for($cart)
 | Orders, inventory, customers, admin | `Authorization: Bearer {token}` or `X-Commerce-Api-Token` |
 | Inbound webhooks | Per-gateway (see below) |
 
-**Scopes:** `catalog`, `inventory`, `orders`, `returns`, `customers`, `stores`, `companies`, `marketplace`, `subscriptions` — each `.read` / `.write`. `COMMERCE_API_TOKEN` grants `*`.
+Forgot the token? The API says no. This is commerce, not a house party.
+
+**Scopes:** `catalog`, `inventory`, `orders`, `returns`, `customers`, `stores`, `companies`, `marketplace`, `subscriptions` — each `.read` / `.write`. `COMMERCE_API_TOKEN` grants `*`. With great power comes great `git blame`.
 
 ### Guest & checkout routes
 
@@ -352,7 +372,7 @@ Routes for stores, companies, vendors, and subscriptions register only when thei
 | Stripe | `POST /api/ez-commerce/v1/webhooks/stripe` | `Stripe-Signature` + `STRIPE_WEBHOOK_SECRET` |
 | PayPal | `POST .../webhooks/paypal` | Native when `PAYPAL_WEBHOOK_ID` set; else `X-Commerce-Webhook-Secret` |
 | Telr | `POST .../webhooks/telr` | `X-Commerce-Webhook-Secret` |
-| fake | `POST .../webhooks/fake` | Local/testing only |
+| fake | `POST .../webhooks/fake` | Local/testing only — the gateway equivalent of "trust me bro" |
 
 **IDs in URLs:** resource `public_id` (ULID) unless noted (cart line `itemId`, reservation id, webhook delivery id are numeric).
 
@@ -362,19 +382,21 @@ Routes for stores, companies, vendors, and subscriptions register only when thei
 
 ## Payment drivers
 
-Default: `COMMERCE_PAYMENT_DRIVER=manual`. Override per checkout with `->paymentMethod('stripe')`.
+Default: `COMMERCE_PAYMENT_DRIVER=manual`. Override per checkout with `->paymentMethod('stripe')`. Pick your fighter.
 
 | Driver | Capture | Refund | Webhooks | Production notes |
 |--------|---------|--------|----------|------------------|
 | `manual` | API / action | Yes | No | Default for B2B and admin capture |
 | `null` | Auto on zero total | No | No | Free orders only |
-| `fake` | Test double | Test double | Yes | Testing only |
+| `fake` | Test double | Test double | Yes | Testing only — do not point this at your CFO |
 | `net_terms` | Deferred (manual gateway) | Yes | No | B2B; terms on order metadata |
 | `stripe` | Manual PI + capture endpoint | Yes | Yes | `capture_method=manual`; idempotency on session/capture/refund |
 | `paypal` | Server capture of approved order | Yes | Yes | Does not treat approval as capture; order ID for lookup |
-| `telr` | **Not supported** | Verified HTTP | Yes | Session redirect; success from callback only |
+| `telr` | **Not supported** | Verified HTTP | Yes | Session redirect; success from callback only — capture is not a vibe Telr supports |
 
 ### Capture → inventory flow
+
+*Money moves, stock moves, events fire once. If step 4 happens, make coffee and open the runbook.*
 
 1. Checkout creates order + reservation + payment session (outside txn).
 2. Capture records ledger transaction with provider `transactionReference`.
@@ -387,7 +409,7 @@ Partial capture updates payment status but does **not** release goods (fulfillme
 
 ## Operator runbook
 
-When a PSP call times out, the attempt is stored as `unknown` and blocks conflicting operations until resolved.
+When a PSP call times out, the attempt is stored as `unknown` and blocks conflicting operations until resolved. The payment is neither succeeded nor failed — it's in quantum superposition until you collapse the wavefunction with `--mark-succeeded` or `--mark-failed`.
 
 ### Unknown captures
 
@@ -420,6 +442,8 @@ php artisan commerce:reconcile-finalizations {payment} --complete
 
 ## Feature flags
 
+Most modules ship **off** by default. Opt in to the chaos you actually need.
+
 Published defaults in `config/ez-ecommerce.php`:
 
 ```php
@@ -451,7 +475,7 @@ Enable modules your host app needs, then run `php artisan config:clear`.
 | `inventory.reservation_ttl.*` | Hold minutes per payment method |
 | `cart.guest_ttl_days` | Guest cart expiry |
 | `api.token` / `api.scoped_tokens` | Admin and scoped API tokens |
-| `api.allow_unauthenticated` | Dev-only bypass (`false` in prod) |
+| `api.allow_unauthenticated` | Dev-only bypass (`false` in prod) — `true` is "yolo mode" |
 | `inbound_webhooks.shared_secret` | PayPal/Telr fallback auth |
 | `outbound_webhooks.secret` / `endpoints` | HMAC + event subscriptions |
 | `idempotency.ttl_minutes` / `lock_ttl_seconds` | Checkout idempotency lifetime |
@@ -461,6 +485,8 @@ Publish: `php artisan vendor:publish --tag=ez-ecommerce-config`
 ---
 
 ## Artisan commands & scheduler
+
+Housekeeping commands. Run them on a schedule or live dangerously — expired reservations don't release themselves (yet).
 
 ```powershell
 php artisan commerce:install
@@ -488,6 +514,8 @@ Schedule::command('commerce:purge-idempotency-records')->daily();
 
 ## Extending the engine
 
+Swap contracts, don't fork the universe. If you're copy-pasting `PlaceOrder`, you've gone too far.
+
 | Contract | Default |
 |----------|---------|
 | `PriceResolver` | `DefaultPriceResolver` |
@@ -499,7 +527,7 @@ Schedule::command('commerce:purge-idempotency-records')->daily();
 | `FulfillmentReleasePolicy` | `DefaultFulfillmentReleasePolicy` |
 | `StoreContext` | `DefaultStoreContext` |
 
-Register host morph aliases:
+Register host morph aliases (so polymorphic relations don't store FQCNs longer than your commit messages):
 
 ```php
 EzEcommerce::morphMap(['my_user' => \App\Models\User::class]);
@@ -520,6 +548,16 @@ Outbound webhooks example:
 
 ## Testing & CI
 
+**The vibe-coded release checklist:**
+
+| Result | What to do |
+|--------|------------|
+| All 97 green | You're ready to go. Ship it. Tell nobody you only ran the tests once. |
+| One red | Panic. Then fix it. Then panic again because you almost shipped. |
+| All red | Close the laptop. The engine is telling you something. Probably "sleep." |
+| PHPStan green, Pest red | Your types are lying. Trust the tests. |
+| Pest green, PHPStan red | Your types are honest. Your runtime is a miracle. Fix PHPStan anyway. |
+
 ```powershell
 composer test
 vendor/bin/pest --group=hardening   # payment correctness on MySQL
@@ -534,9 +572,11 @@ vendor/bin/phpstan analyse --memory-limit=512M
 | **SQLite matrix** | PHP 8.2–8.4 × Laravel 11/12/13; `pest` + PHPStan (`--prefer-lowest`) |
 | **Hardening (MySQL)** | `pest --group=hardening` on MySQL 8 |
 
-Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conflicts.
+Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conflicts. PHPStan and Canvas have… history.
 
 ### Test suite (97 tests, 13 files)
+
+*97 tests can't prove your checkout works in prod, but 97 failures can prove it doesn't work in CI. Start there.*
 
 | File | Focus |
 |------|-------|
@@ -555,7 +595,9 @@ Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conf
 
 ## Roadmap
 
-1. Refund webhook reconciliation (async PSP lifecycle)
+Things we know we still owe the universe:
+
+1. Refund webhook reconciliation (async PSP lifecycle) — because "we'll check the dashboard" is not a strategy
 2. Outbound webhook delivery retries (throw on non-2xx)
 3. Catalog update/delete API
 4. PostgreSQL CI + concurrent transaction tests
@@ -568,5 +610,7 @@ See [`AGENTS.md`](AGENTS.md) for implementation constraints.
 ## License
 
 MIT — Copyright (c) Nawras Al Bukhari nawrasalbukhari@gmail.com
+
+Use it, fork it, vibe-code on top of it. Just run the tests first. Seriously. [See checklist above.](#testing--ci)
 
 See license text in repository root.
