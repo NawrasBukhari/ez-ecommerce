@@ -11,7 +11,6 @@ use EzEcommerce\Inventory\Models\InventoryMovement;
 use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Orders\Models\Order;
 use Illuminate\Support\Facades\DB;
-use InvalidArgumentException;
 
 final class CommitReservation
 {
@@ -45,6 +44,19 @@ final class CommitReservation
             );
 
             if ($uncommitted->isEmpty()) {
+                $order->refresh();
+                $metadata = $order->metadata instanceof \ArrayObject
+                    ? $order->metadata->getArrayCopy()
+                    : (array) ($order->metadata ?? []);
+                $expected = $metadata['expected_reservation_count'] ?? null;
+                $committedCount = $reservations
+                    ->where('status', ReservationStatus::Committed)
+                    ->count();
+
+                if ($expected !== null && (int) $expected > 0 && $committedCount < (int) $expected) {
+                    throw InventoryCommitException::missingReservations($order->id);
+                }
+
                 return;
             }
 
@@ -85,14 +97,16 @@ final class CommitReservation
         $balance = InventoryBalance::query()->lockForUpdate()->findOrFail($locked->balance_id);
 
         if ($balance->reserved < $locked->quantity) {
-            throw new InvalidArgumentException(
-                "Balance [{$balance->id}] reserved [{$balance->reserved}] is less than reservation quantity [{$locked->quantity}].",
+            throw InventoryCommitException::balanceInvariantViolated(
+                $balance->id,
+                "reserved [{$balance->reserved}] is less than reservation quantity [{$locked->quantity}]",
             );
         }
 
         if ($balance->on_hand < $locked->quantity) {
-            throw new InvalidArgumentException(
-                "Balance [{$balance->id}] on_hand [{$balance->on_hand}] is less than reservation quantity [{$locked->quantity}].",
+            throw InventoryCommitException::balanceInvariantViolated(
+                $balance->id,
+                "on_hand [{$balance->on_hand}] is less than reservation quantity [{$locked->quantity}]",
             );
         }
 

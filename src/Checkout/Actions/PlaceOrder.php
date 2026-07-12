@@ -6,10 +6,9 @@ use EzEcommerce\Cart\Actions\CalculateCartTotals;
 use EzEcommerce\Cart\Exceptions\CartTotalsChangedException;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Checkout\CheckoutResult;
-use EzEcommerce\Core\Enums\PaymentStatus;
-use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Core\Enums\CheckoutStatus;
+use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Events\OrderPlaced;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Support\CanonicalJson;
@@ -20,11 +19,14 @@ use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Actions\ReserveInventory;
 use EzEcommerce\Inventory\Contracts\ReservationPolicy;
+use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
+use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Orders\Actions\CreateOrderFromCart;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Actions\CreatePaymentSession;
 use EzEcommerce\Payments\Data\PaymentFailure;
+use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use Illuminate\Support\Facades\DB;
@@ -163,7 +165,15 @@ final class PlaceOrder
                 $billingAddress,
             );
 
-            $this->reserveInventory->executeForCart($cart, $order, $paymentMethod);
+            $reservations = $this->reserveInventory->executeForCart($cart, $order, $paymentMethod);
+
+            if ($reservations !== []) {
+                $metadata = $order->metadata instanceof \ArrayObject
+                    ? $order->metadata->getArrayCopy()
+                    : (array) ($order->metadata ?? []);
+                $metadata['expected_reservation_count'] = count($reservations);
+                $order->update(['metadata' => $metadata]);
+            }
 
             $payment = Payment::query()->create([
                 'order_id' => $order->id,
@@ -208,6 +218,14 @@ final class PlaceOrder
             } elseif ($this->reservationPolicy->shouldCommitImmediately($commercial['order'], $paymentMethod)) {
                 $this->commitReservation->executeForOrder($commercial['order']);
             }
+        } catch (ReservationExpiredException|InventoryCommitException $e) {
+            $commercial['attempt']->update([
+                'status' => 'failed',
+                'error_code' => 'finalization_exception',
+                'error_message' => $e->getMessage(),
+            ]);
+            $paymentFailure = new PaymentFailure('finalization_exception', $e->getMessage(), false);
+            $status = CheckoutStatus::FinalizationFailed;
         } catch (\Throwable $e) {
             $commercial['attempt']->update([
                 'status' => 'failed_retryable',

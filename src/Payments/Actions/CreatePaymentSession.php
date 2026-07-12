@@ -3,13 +3,13 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
-use EzEcommerce\Core\Money\Money;
 
 final class CreatePaymentSession
 {

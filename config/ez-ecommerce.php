@@ -1,5 +1,12 @@
 <?php
 
+use EzEcommerce\Payments\Drivers\FakePaymentGateway;
+use EzEcommerce\Payments\Drivers\ManualPaymentGateway;
+use EzEcommerce\Payments\Drivers\NullPaymentGateway;
+use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
+use EzEcommerce\Payments\Drivers\StripePaymentGateway;
+use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
+
 return [
 
     'currency' => [
@@ -17,13 +24,13 @@ return [
         'payment' => [
             'default' => env('COMMERCE_PAYMENT_DRIVER', 'manual'),
             'gateways' => [
-                'null' => \EzEcommerce\Payments\Drivers\NullPaymentGateway::class,
-                'manual' => \EzEcommerce\Payments\Drivers\ManualPaymentGateway::class,
-                'net_terms' => \EzEcommerce\Payments\Drivers\ManualPaymentGateway::class,
-                'fake' => \EzEcommerce\Payments\Drivers\FakePaymentGateway::class,
-                'stripe' => \EzEcommerce\Payments\Drivers\StripePaymentGateway::class,
-                'paypal' => \EzEcommerce\Payments\Drivers\PayPalPaymentGateway::class,
-                'telr' => \EzEcommerce\Payments\Drivers\TelrPaymentGateway::class,
+                'null' => NullPaymentGateway::class,
+                'manual' => ManualPaymentGateway::class,
+                'net_terms' => ManualPaymentGateway::class,
+                'fake' => FakePaymentGateway::class,
+                'stripe' => StripePaymentGateway::class,
+                'paypal' => PayPalPaymentGateway::class,
+                'telr' => TelrPaymentGateway::class,
             ],
             'stripe' => [
                 'secret' => env('STRIPE_SECRET'),

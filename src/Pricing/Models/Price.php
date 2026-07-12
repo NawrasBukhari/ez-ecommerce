@@ -5,12 +5,13 @@ namespace EzEcommerce\Pricing\Models;
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Customers\Models\CustomerGroup;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ * @property ArrayObject<int|string, mixed>|null $metadata
  */
 class Price extends CommerceModel
 {

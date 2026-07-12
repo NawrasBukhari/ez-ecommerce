@@ -3,14 +3,25 @@
 use EzEcommerce\Core\Enums\CheckoutStatus;
 use EzEcommerce\Core\Enums\IdempotencyStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
+use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Enums\ReservationStatus;
+use EzEcommerce\Core\Events\OrderPaid;
+use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Models\IdempotencyRecord;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Fulfillment\Actions\CreateFulfillment;
+use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
+use EzEcommerce\Payments\Actions\ApplyPaymentCapture;
 use EzEcommerce\Payments\Actions\CapturePayment;
+use EzEcommerce\Payments\Actions\FinalizeAcceptedPayment;
+use EzEcommerce\Payments\Data\PaymentFailure;
+use EzEcommerce\Payments\Data\PaymentResult;
+use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
+use Illuminate\Support\Facades\Event;
 
 uses(SetsUpCatalog::class);
 
@@ -130,13 +141,13 @@ it('does not confirm order when reservations are expired', function () {
     $result = placeCheckoutOrder($cart, 'expired-res-'.uniqid());
 
     $order = $result->order->fresh();
-    $order->reservations()->update(['status' => \EzEcommerce\Core\Enums\ReservationStatus::Expired]);
+    $order->reservations()->update(['status' => ReservationStatus::Expired]);
 
     $payment = $result->payment;
     $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
 
     expect(fn () => app(CapturePayment::class)->execute($payment, $attempt))
-        ->toThrow(\EzEcommerce\Inventory\Exceptions\ReservationExpiredException::class);
+        ->toThrow(ReservationExpiredException::class);
 
     expect($order->fresh()->status)->toBe(OrderStatus::PendingPayment);
 })->group('hardening');
@@ -150,7 +161,7 @@ it('keeps partially captured payment status when a follow-up capture fails', fun
     $payment = $result->payment;
     $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
 
-    app(\EzEcommerce\Payments\Actions\ApplyPaymentCapture::class)->execute(
+    app(ApplyPaymentCapture::class)->execute(
         $payment,
         $attempt,
         4000,
@@ -160,14 +171,14 @@ it('keeps partially captured payment status when a follow-up capture fails', fun
     $attempt->update(['status' => 'succeeded']);
 
     $payment = $payment->fresh();
-    expect($payment->status)->toBe(\EzEcommerce\Core\Enums\PaymentStatus::PartiallyCaptured);
+    expect($payment->status)->toBe(PaymentStatus::PartiallyCaptured);
 
-    $this->app->instance(\EzEcommerce\Payments\Drivers\FakePaymentGateway::class, new \EzEcommerce\Payments\Drivers\FakePaymentGateway(
-        captureResult: new \EzEcommerce\Payments\Data\PaymentResult(
+    $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
+        captureResult: new PaymentResult(
             success: false,
-            status: \EzEcommerce\Core\Enums\PaymentStatus::Failed,
+            status: PaymentStatus::Failed,
             amount: Money::fromMinor(6000, 'AED'),
-            failure: new \EzEcommerce\Payments\Data\PaymentFailure('declined', 'Capture declined', false),
+            failure: new PaymentFailure('declined', 'Capture declined', false),
         ),
     ));
 
@@ -180,5 +191,101 @@ it('keeps partially captured payment status when a follow-up capture fails', fun
 
     app(CapturePayment::class)->execute($payment, $secondAttempt, Money::fromMinor(6000, 'AED'));
 
-    expect($payment->fresh()->status)->toBe(\EzEcommerce\Core\Enums\PaymentStatus::PartiallyCaptured);
+    expect($payment->fresh()->status)->toBe(PaymentStatus::PartiallyCaptured);
+})->group('hardening');
+
+it('dispatches OrderPaid when partial capture is later completed', function () {
+    Event::fake([OrderPaid::class]);
+
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'partial-paid-'.uniqid());
+
+    $payment = $result->payment->fresh();
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+    $partialAmount = (int) floor($payment->amount_minor / 2);
+    $remainder = $payment->amount_minor - $partialAmount;
+
+    app(ApplyPaymentCapture::class)->execute(
+        $payment,
+        $attempt,
+        $partialAmount,
+        $payment->currency,
+        'partial-capture-1',
+    );
+    $attempt->update(['status' => 'succeeded']);
+
+    $payment = $payment->fresh();
+    app(FinalizeAcceptedPayment::class)->completeOrderAfterCapture($payment);
+
+    Event::assertNotDispatched(OrderPaid::class);
+
+    $secondAttempt = PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'create_session',
+        'idempotency_key' => 'partial-capture-2',
+        'status' => 'succeeded',
+    ]);
+
+    app(CapturePayment::class)->execute(
+        $payment,
+        $secondAttempt,
+        Money::fromMinor($remainder, $payment->currency),
+    );
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Captured);
+    Event::assertDispatched(OrderPaid::class, 1);
+})->group('hardening');
+
+it('blocks a new capture while an unknown capture requires reconciliation', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'unknown-cap-'.uniqid());
+
+    $payment = $result->payment;
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+
+    $attempt->update([
+        'operation' => 'capture',
+        'status' => 'unknown',
+        'idempotency_key' => 'capture-unknown-1',
+    ]);
+
+    $secondAttempt = PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'create_session',
+        'idempotency_key' => 'capture-unknown-2',
+        'status' => 'succeeded',
+    ]);
+
+    expect(fn () => app(CapturePayment::class)->execute($payment->fresh(), $secondAttempt))
+        ->toThrow(RuntimeException::class, 'reconciliation');
+})->group('hardening');
+
+it('rejects refund idempotency key reuse with a different amount', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'refund-idem-'.uniqid());
+
+    $payment = $result->payment;
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+    app(CapturePayment::class)->execute($payment, $attempt);
+
+    $key = 'refund-idem-key';
+    app(RefundPayment::class)->execute(
+        $payment->fresh(),
+        Money::fromMinor(1000, 'AED'),
+        'partial',
+        $key,
+    );
+
+    expect(fn () => app(RefundPayment::class)->execute(
+        $payment->fresh(),
+        Money::fromMinor(2000, 'AED'),
+        'partial',
+        $key,
+    ))->toThrow(IdempotencyPayloadMismatchException::class);
 })->group('hardening');

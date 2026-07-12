@@ -5,6 +5,7 @@ namespace EzEcommerce\Catalog\Models;
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Database\Factories\ProductFactory;
 use EzEcommerce\Marketplace\Models\Vendor;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,7 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $name
  * @property string|null $type
  * @property int|null $vendor_id
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ * @property ArrayObject<int|string, mixed>|null $metadata
  */
 class Product extends CommerceModel
 {

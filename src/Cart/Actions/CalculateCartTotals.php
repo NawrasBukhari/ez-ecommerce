@@ -35,7 +35,7 @@ final class CalculateCartTotals
         ?Address $shippingAddress = null,
         ?int $expectedVersion = null,
     ): Cart {
-        return DB::transaction(function () use ($cart, $shippingMethod, $shippingAddress, $expectedVersion) {
+        $callback = function () use ($cart, $shippingMethod, $shippingAddress, $expectedVersion): Cart {
             $cart = Cart::query()->lockForUpdate()->findOrFail($cart->id);
 
             if ($expectedVersion !== null && $cart->version !== $expectedVersion) {
@@ -157,24 +157,34 @@ final class CalculateCartTotals
                 || $cart->shipping_total_minor !== $shippingQuote->amount->minorAmount
                 || $cart->grand_total_minor !== $grandTotalMinor;
 
-            $updated = Cart::query()
-                ->where('id', $cart->id)
-                ->where('version', $cart->version)
-                ->update([
-                    'subtotal_minor' => $subtotalMinor,
-                    'discount_total_minor' => abs($manualDiscountMinor),
-                    'tax_total_minor' => $taxResult->total->minorAmount,
-                    'shipping_total_minor' => $shippingQuote->amount->minorAmount,
-                    'grand_total_minor' => $grandTotalMinor,
-                    'version' => $totalsChanged ? $cart->version + 1 : $cart->version,
-                ]);
+            $nextVersion = $totalsChanged ? $cart->version + 1 : $cart->version;
 
-            if ($updated === 0) {
+            $updateQuery = Cart::query()->where('id', $cart->id);
+            if ($expectedVersion !== null) {
+                $updateQuery->where('version', $cart->version);
+            }
+
+            $updated = $updateQuery->update([
+                'subtotal_minor' => $subtotalMinor,
+                'discount_total_minor' => abs($manualDiscountMinor),
+                'tax_total_minor' => $taxResult->total->minorAmount,
+                'shipping_total_minor' => $shippingQuote->amount->minorAmount,
+                'grand_total_minor' => $grandTotalMinor,
+                'version' => $nextVersion,
+            ]);
+
+            if ($expectedVersion !== null && $updated === 0) {
                 throw CartVersionConflictException::for($cart);
             }
 
             return $cart->fresh(['items', 'adjustments']);
-        });
+        };
+
+        if (DB::transactionLevel() > 0) {
+            return $callback();
+        }
+
+        return DB::transaction($callback);
     }
 
     public function totalsHash(Cart $cart, ?string $shippingMethod = null): string

@@ -3,13 +3,14 @@
 namespace EzEcommerce\Payments\Models;
 
 use EzEcommerce\Core\Models\CommerceModel;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $request_metadata
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $response_metadata
+ * @property ArrayObject<int|string, mixed>|null $request_metadata
+ * @property ArrayObject<int|string, mixed>|null $response_metadata
  */
 class PaymentAttempt extends CommerceModel
 {

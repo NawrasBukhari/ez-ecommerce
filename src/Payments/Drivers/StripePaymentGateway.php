@@ -16,6 +16,7 @@ use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
+use Stripe\StripeClient;
 
 final class StripePaymentGateway implements PaymentGateway
 {
@@ -23,7 +24,7 @@ final class StripePaymentGateway implements PaymentGateway
 
     public function __construct()
     {
-        if (! class_exists(\Stripe\StripeClient::class)) {
+        if (! class_exists(StripeClient::class)) {
             throw PaymentDriverNotInstalled::for('stripe', 'stripe/stripe-php');
         }
 
@@ -32,7 +33,7 @@ final class StripePaymentGateway implements PaymentGateway
             throw PaymentDriverNotInstalled::notConfigured('stripe');
         }
 
-        $this->client = new \Stripe\StripeClient($secret);
+        $this->client = new StripeClient($secret);
     }
 
     public function capabilities(): PaymentGatewayCapabilities
@@ -73,9 +74,13 @@ final class StripePaymentGateway implements PaymentGateway
             throw PaymentOperationNotSupported::for('stripe', 'capture without payment_intent');
         }
 
-        $intent = $this->client->paymentIntents->capture($intentId, [
-            'amount_to_capture' => $data->amount->minorAmount,
-        ]);
+        $intent = $this->client->paymentIntents->capture(
+            $intentId,
+            ['amount_to_capture' => $data->amount->minorAmount],
+            $data->attempt->idempotency_key !== '' && $data->attempt->idempotency_key !== null
+                ? ['idempotency_key' => $data->attempt->idempotency_key]
+                : [],
+        );
 
         return new PaymentResult(
             success: $intent->status === 'succeeded',

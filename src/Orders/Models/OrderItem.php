@@ -4,12 +4,13 @@ namespace EzEcommerce\Orders\Models;
 
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $product_snapshot
+ * @property ArrayObject<int|string, mixed>|null $product_snapshot
  */
 class OrderItem extends CommerceModel
 {

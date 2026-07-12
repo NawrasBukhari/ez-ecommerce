@@ -35,17 +35,26 @@ final class CapturePayment
                 throw new InvalidArgumentException('Nothing left to capture.');
             }
 
-            $pendingCapture = PaymentAttempt::query()
+            $inFlightCapture = PaymentAttempt::query()
                 ->where('payment_id', $locked->id)
                 ->where('operation', 'capture')
-                ->where('status', 'pending')
+                ->where('id', '!=', $attempt->id)
+                ->whereIn('status', ['pending', 'unknown'])
                 ->exists();
 
-            if ($pendingCapture) {
-                throw new RuntimeException('A capture is already in progress for this payment.');
+            if ($inFlightCapture) {
+                throw new RuntimeException('A capture is in progress or requires reconciliation for this payment.');
             }
 
-            $attempt->update(['operation' => 'capture', 'status' => 'pending']);
+            $captureIdempotencyKey = $attempt->idempotency_key !== '' && $attempt->idempotency_key !== null
+                ? $attempt->idempotency_key
+                : "capture:{$attempt->id}";
+
+            $attempt->update([
+                'operation' => 'capture',
+                'status' => 'pending',
+                'idempotency_key' => $captureIdempotencyKey,
+            ]);
 
             return ['payment' => $locked, 'amount' => $captureAmount];
         });

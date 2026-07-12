@@ -9,9 +9,9 @@ function placeCheckoutOrder($cart, string $idempotencyKey, ?string $shippingMeth
 {
     $cart = $cart->fresh();
     $cart = EzEcommerce::cart()->calculateTotals($cart, $shippingMethod);
-    $hash = EzEcommerce::cart()->totalsHash($cart->fresh(), $shippingMethod);
+    $hash = EzEcommerce::cart()->totalsHash($cart, $shippingMethod);
 
-    return EzEcommerce::checkout()->for($cart)
+    return EzEcommerce::checkout()->for($cart->fresh())
         ->shippingMethod($shippingMethod)
         ->paymentMethod($paymentMethod)
         ->place(idempotencyKey: $idempotencyKey, expectedTotalsHash: $hash);

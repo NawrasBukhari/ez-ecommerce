@@ -10,6 +10,7 @@ use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Database\Factories\ProductVariantFactory;
 use EzEcommerce\Inventory\Models\InventoryBalance;
 use EzEcommerce\Pricing\Models\Price;
+use Illuminate\Database\Eloquent\Casts\ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $public_id
  * @property string|null $sku
  * @property string|null $name
- * @property \Illuminate\Database\Eloquent\Casts\ArrayObject<int|string, mixed>|null $metadata
+ * @property ArrayObject<int|string, mixed>|null $metadata
  * @property-read Product|null $product
  */
 class ProductVariant extends CommerceModel implements Purchasable, Shippable, Stockable, Taxable

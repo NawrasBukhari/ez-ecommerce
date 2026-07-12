@@ -3,6 +3,7 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Contracts\Clock;
+use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
@@ -80,6 +81,8 @@ final class ReconcilePayment
                     return;
                 }
 
+                $wasFullyCaptured = $payment->status === PaymentStatus::Captured;
+
                 $payment = $this->applyPaymentCapture->execute(
                     $payment,
                     null,
@@ -92,8 +95,15 @@ final class ReconcilePayment
                 $this->recalculateOrderPaymentStatus->execute($payment->order);
 
                 try {
-                    $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment);
+                    $this->finalizeAcceptedPayment->completeOrderAfterCapture($payment, $wasFullyCaptured);
                 } catch (ReservationExpiredException|InventoryCommitException $e) {
+                    $order = $payment->order;
+                    $metadata = $order->metadata instanceof \ArrayObject
+                        ? $order->metadata->getArrayCopy()
+                        : (array) ($order->metadata ?? []);
+                    $metadata['manual_review_required'] = 'inventory_exception';
+                    $order->update(['metadata' => $metadata]);
+
                     $record->update([
                         'status' => 'failed',
                         'last_error' => $e->getMessage(),
