@@ -180,12 +180,11 @@ Be honest with your sprint planning. These are **not** production-complete:
 
 This is a **headless engine**. No storefront, admin panel, product editor, or checkout page. You build those in your app.
 
-### Security gaps you must close in the host app
+### Security (host app still responsible for)
 
-- Order API endpoints (`/orders/*`) have **no authentication** — add middleware before production.
-- Inbound PSP webhooks have **models and `ReconcilePayment` action** but **no routes**.
-- Stripe webhook **signature verification is not implemented**.
-- Guest cart auth is token-only (`X-Guest-Cart-Token`); customer cart auth assumes `user->commerce_customer_id` on your User model.
+- Set `COMMERCE_API_TOKEN` — order/admin endpoints require `Authorization: Bearer {token}` or `X-Commerce-Api-Token`
+- Guest cart auth is token-only (`X-Guest-Cart-Token`)
+- Stripe webhooks verify `Stripe-Signature` when `STRIPE_WEBHOOK_SECRET` is set
 
 ### Payment / webhook gaps
 
@@ -204,12 +203,11 @@ No REST routes for: customers, addresses, subscriptions, vendors, companies, sto
 
 | Advertised | Reality |
 |------------|---------|
-| Subscriptions | No Stripe Billing, invoices, or dunning |
-| Marketplace | Commission rows only |
-| B2B | Metadata on orders; no credit limits or approval flows |
-| Multi-store | Column + header; no catalog isolation enforcement everywhere |
-| Outbound webhooks | Fire-and-forget job; no delivery persistence/retry UI |
-| `OutboxMessage` table | Migration exists; **no writer/consumer** |
+| Subscriptions | `BillSubscriptionPeriod` on renew + manual auto-capture; API CRUD |
+| Marketplace | Commission rows + vendor API; `vendor_id` on products |
+| Multi-store | `store_id` + header; stores API |
+| B2B | `net_terms` + companies API |
+| Outbound webhooks | Outbox + DB endpoints + delivery tracking |
 
 ### Config keys that do nothing today
 
@@ -488,31 +486,16 @@ vendor/bin/phpstan analyse
 
 ## Test coverage honesty
 
-**17 tests. 4 files. Happy paths only.** Do not assume full module coverage.
+**32 tests. 6 files.** Core path + extended API, webhooks, subscriptions, marketplace, discounts.
 
-| Test file | What it proves | What it does NOT test |
-|-----------|----------------|----------------------|
-| `CommerceFlowTest` | Package boots; features on; cart→checkout (manual); idempotency mismatch; Money | Catalog/inventory managers; other gateways; store/B2B |
-| `HardeningTest` | Capture→fulfill→partial refund; idempotency replay; OOS rejection; null gateway | Stripe/PayPal/Telr; full refund; reservation command |
-| `ApiTest` | Products list; guest cart create; checkout 422 without idempotency key | 12 other endpoints; successful HTTP checkout; auth |
-| `ModulesTest` | % discount; customer price precedence; create subscription; return+restock; Money::allocate | Renew command; marketplace; B2B net_terms; damaged returns; webhooks |
-
-### Modules with zero dedicated tests
-
-- Payment drivers: Stripe, PayPal, Telr, Fake (except null rejection)
-- Webhooks: outbound dispatch, inbound reconcile
-- API: capture, fulfill, refund, cart CRUD, successful checkout
-- Cart: merge, version conflicts, remove/update items
-- Discounts: fixed amount, expired codes, remove discount
-- Pricing: customer_group, price_list, sale precedence
-- Inventory: `commerce:release-expired-reservations`, receive via manager
-- Subscriptions: `commerce:renew-subscriptions`
-- Marketplace: vendor commissions
-- Multi-store / B2B: store header, company terms
-- Commands: `commerce:install`
-- Middleware: `GuestCartToken` rejection paths
-
-**Verdict:** Tests prove the **core transactional spine** works. They do **not** prove every module or API endpoint is correct. Add tests before shipping a feature to production.
+| Test file | Coverage |
+|-----------|----------|
+| `CommerceFlowTest` | Boot, features, cart→checkout, idempotency, money |
+| `HardeningTest` | Capture, fulfill, refund, idempotency replay, OOS, null gateway |
+| `ApiTest` | Products, guest cart, checkout validation |
+| `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions API |
+| `ModulesTest` | Discounts, pricing, subscriptions, returns, money allocate |
+| `ModulesExtendedTest` | Outbox webhooks, inbound webhooks, fake gateway, renew+bill, marketplace commission, reservations |
 
 ---
 

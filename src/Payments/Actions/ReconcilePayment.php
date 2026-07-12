@@ -39,7 +39,7 @@ final class ReconcilePayment
 
         $existing = ProcessedGatewayEvent::query()
             ->where('gateway', $request->gateway)
-            ->where('external_id', $event->externalId)
+            ->where('external_event_id', $event->externalId)
             ->first();
 
         if ($existing !== null) {
@@ -48,8 +48,9 @@ final class ReconcilePayment
 
         ProcessedGatewayEvent::query()->create([
             'gateway' => $request->gateway,
-            'external_id' => $event->externalId,
+            'external_event_id' => $event->externalId,
             'event_type' => $event->eventType,
+            'payload' => json_decode($request->payload, true, 512, JSON_THROW_ON_ERROR),
             'processed_at' => $this->clock->now(),
         ]);
 
@@ -127,6 +128,7 @@ final class ReconcilePayment
             'stripe' => app(StripePaymentGateway::class),
             'paypal' => app(PayPalPaymentGateway::class),
             'telr' => app(TelrPaymentGateway::class),
+            'net_terms' => app(ManualPaymentGateway::class),
             default => throw new InvalidArgumentException("Unknown payment gateway [{$name}]."),
         };
     }

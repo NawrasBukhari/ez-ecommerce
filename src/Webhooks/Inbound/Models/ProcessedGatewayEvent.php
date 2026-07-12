@@ -10,14 +10,16 @@ class ProcessedGatewayEvent extends CommerceModel
 
     protected $fillable = [
         'gateway',
-        'external_id',
+        'external_event_id',
         'event_type',
+        'payload',
         'processed_at',
     ];
 
     protected function casts(): array
     {
         return [
+            'payload' => 'array',
             'processed_at' => 'immutable_datetime',
         ];
     }

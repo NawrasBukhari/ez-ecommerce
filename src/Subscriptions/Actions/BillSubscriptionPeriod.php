@@ -57,13 +57,15 @@ final class BillSubscriptionPeriod
 
         OrderItem::query()->create([
             'order_id' => $order->id,
+            'name' => $plan->name,
             'quantity' => 1,
             'unit_price_minor' => $amountMinor,
-            'line_subtotal_minor' => $amountMinor,
-            'line_discount_minor' => 0,
-            'line_tax_minor' => 0,
-            'line_total_minor' => $amountMinor,
+            'subtotal_minor' => $amountMinor,
+            'total_minor' => $amountMinor,
             'currency' => $plan->currency,
+            'price_source' => 'subscription',
+            'price_quote_hash' => hash('sha256', 'subscription:'.$plan->id),
+            'priced_at' => $this->clock->now(),
             'product_snapshot' => [
                 'name' => $plan->name,
                 'type' => 'subscription',
@@ -97,7 +99,7 @@ final class BillSubscriptionPeriod
         }
 
         $subscription->update([
-            'metadata' => array_merge($subscription->metadata?->toArray() ?? [], [
+            'metadata' => array_merge($subscription->metadata?->getArrayCopy() ?? [], [
                 'last_billed_order_id' => $order->id,
                 'last_billed_at' => $this->clock->now()->format(\DateTimeInterface::ATOM),
             ]),

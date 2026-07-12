@@ -27,6 +27,7 @@ abstract class TestCase extends Orchestra
         config()->set('ez-ecommerce.tax.rate', 0.05);
         config()->set('ez-ecommerce.shipping.flat_rate_minor', 1000);
         config()->set('ez-ecommerce.features.api', true);
+        config()->set('ez-ecommerce.api.token', 'test-api-token');
     }
 
     protected function defineDatabaseMigrations(): void

@@ -28,7 +28,7 @@ final class RecordVendorCommissions
                 continue;
             }
 
-            $commissionMinor = (int) round($item->total_minor * ($vendor->commission_rate / 100));
+            $commissionMinor = (int) round($item->total_minor * (float) $vendor->commission_rate);
 
             VendorCommission::query()->create([
                 'order_id' => $order->id,

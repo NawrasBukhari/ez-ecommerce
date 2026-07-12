@@ -9,6 +9,10 @@ class ShippingServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->app->bind(ShippingCalculator::class, FlatShippingCalculator::class);
+        $this->app->bind(ShippingCalculator::class, function ($app): ShippingCalculator {
+            return match (config('ez-ecommerce.drivers.shipping.default', 'flat')) {
+                default => $app->make(FlatShippingCalculator::class),
+            };
+        });
     }
 }

@@ -3,7 +3,6 @@
 use EzEcommerce\Core\Enums\SubscriptionInterval;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Customers\Models\Customer;
-use EzEcommerce\Discounts\Actions\ApplyDiscountCode;
 use EzEcommerce\Discounts\Models\Discount;
 use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Inventory\Models\InventoryBalance;
@@ -32,7 +31,7 @@ it('applies percent discount code to cart', function () {
 
     ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
     EzEcommerce::cart()->addItem($cart, $variant, 1);
-    app(ApplyDiscountCode::class)->execute($cart, 'SAVE10');
+    EzEcommerce::cart()->applyDiscount($cart, 'SAVE10');
     $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
 
     expect($cart->discount_total_minor)->toBeGreaterThan(0);

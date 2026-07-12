@@ -74,7 +74,11 @@ class ProductVariant extends CommerceModel implements Purchasable, Shippable, St
     /** @return array<string, mixed> */
     public function purchasableMetadata(): array
     {
-        return $this->metadata?->toArray() ?? [];
+        $this->loadMissing('product');
+
+        return array_merge($this->metadata?->toArray() ?? [], [
+            'vendor_id' => $this->product?->vendor_id,
+        ]);
     }
 
     public function stockIdentifier(): string

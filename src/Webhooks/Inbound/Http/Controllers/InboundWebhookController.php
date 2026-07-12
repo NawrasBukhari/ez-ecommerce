@@ -4,12 +4,12 @@ namespace EzEcommerce\Webhooks\Inbound\Http\Controllers;
 
 use EzEcommerce\Payments\Actions\ReconcilePayment;
 use EzEcommerce\Payments\Data\WebhookRequestData;
-use EzEcommerce\Payments\Drivers\StripePaymentGateway;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use InvalidArgumentException;
+use Stripe\Exception\SignatureVerificationException;
+use Stripe\Webhook;
 
 final class InboundWebhookController extends Controller
 {
@@ -50,13 +50,13 @@ final class InboundWebhookController extends Controller
             abort(400, 'Missing Stripe-Signature header.');
         }
 
-        if (! class_exists(\Stripe\Webhook::class)) {
+        if (! class_exists(Webhook::class)) {
             throw PaymentOperationNotSupported::for('stripe', 'webhook verification without stripe/stripe-php');
         }
 
         try {
-            \Stripe\Webhook::constructEvent($payload, $signature, $secret);
-        } catch (\UnexpectedValueException|\Stripe\Exception\SignatureVerificationException $e) {
+            Webhook::constructEvent($payload, $signature, $secret);
+        } catch (\UnexpectedValueException|SignatureVerificationException $e) {
             abort(400, 'Invalid Stripe webhook signature.');
         }
     }

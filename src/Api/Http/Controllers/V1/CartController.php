@@ -114,6 +114,24 @@ final class CartController extends Controller
         return new CartResource($cart);
     }
 
+    public function removeDiscount(Request $request, Cart $cart): CartResource
+    {
+        $validated = $request->validate([
+            'code' => ['sometimes', 'nullable', 'string'],
+            'expected_version' => ['sometimes', 'integer'],
+        ]);
+
+        $cart = $this->commerce->cart()->removeDiscount(
+            $cart,
+            $validated['code'] ?? null,
+            $validated['expected_version'] ?? null,
+        );
+
+        $cart->load('items.purchasable');
+
+        return new CartResource($cart);
+    }
+
     public function calculate(Request $request, Cart $cart): CartResource
     {
         $validated = $request->validate([

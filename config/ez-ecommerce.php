@@ -81,6 +81,7 @@ return [
     'api' => [
         'prefix' => 'api/ez-commerce/v1',
         'middleware' => ['api'],
+        'token' => env('COMMERCE_API_TOKEN'),
     ],
 
     'outbound_webhooks' => [
