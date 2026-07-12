@@ -9,6 +9,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
+use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -17,6 +18,7 @@ final class CapturePayment
 {
     public function __construct(
         private readonly PaymentGatewayRegistry $gateways,
+        private readonly ResolveProviderPaymentReference $providerReference,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
     ) {}
@@ -26,10 +28,12 @@ final class CapturePayment
         ['payment' => $payment, 'amount' => $amount] = DB::transaction(function () use ($payment, $amount, $attempt) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
-            $captureAmount = $amount ?? Money::fromMinor(
-                $locked->amount_minor - $locked->captured_minor,
-                $locked->currency,
-            );
+            $captureAmount = $amount
+                ?? PaymentAttemptRequest::captureAmount($attempt, $locked)
+                ?? Money::fromMinor(
+                    $locked->amount_minor - $locked->captured_minor,
+                    $locked->currency,
+                );
 
             if ($captureAmount->minorAmount <= 0) {
                 throw new InvalidArgumentException('Nothing left to capture.');
@@ -50,11 +54,18 @@ final class CapturePayment
                 ? $attempt->idempotency_key
                 : "capture:{$attempt->id}";
 
+            PaymentAttemptRequest::merge($attempt, [
+                'requested_amount_minor' => $captureAmount->minorAmount,
+                'currency' => $captureAmount->currency,
+                'provider_operation' => 'capture',
+            ]);
+
             $attempt->update([
                 'operation' => 'capture',
                 'status' => 'pending',
                 'idempotency_key' => $captureIdempotencyKey,
             ]);
+            $attempt = $attempt->fresh();
 
             return ['payment' => $locked, 'amount' => $captureAmount];
         });
@@ -62,7 +73,12 @@ final class CapturePayment
         $gateway = $this->gateways->for($payment->gateway);
 
         try {
-            $result = $gateway->capture(new CapturePaymentData($payment, $attempt, $amount));
+            $result = $gateway->capture(new CapturePaymentData(
+                payment: $payment,
+                attempt: $attempt,
+                amount: $amount,
+                providerReference: $this->providerReference->forCapture($payment),
+            ));
         } catch (\Throwable $e) {
             $attempt->update([
                 'status' => 'unknown',

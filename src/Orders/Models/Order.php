@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property ArrayObject<int|string, mixed>|null $metadata
+ * @property-read Customer|null $customer
  */
 class Order extends CommerceModel
 {

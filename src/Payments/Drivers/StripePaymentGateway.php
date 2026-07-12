@@ -58,7 +58,7 @@ final class StripePaymentGateway implements PaymentGateway
                 'order_public_id' => $data->order->public_id,
             ]),
             'automatic_payment_methods' => ['enabled' => true],
-        ]);
+        ], $this->idempotencyOptions($data->attempt->idempotency_key, "session:{$data->attempt->id}"));
 
         return new PaymentSessionResult(
             status: PaymentStatus::RequiresAction,
@@ -69,7 +69,7 @@ final class StripePaymentGateway implements PaymentGateway
 
     public function capture(CapturePaymentData $data): PaymentResult
     {
-        $intentId = $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
+        $intentId = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
         if ($intentId === null) {
             throw PaymentOperationNotSupported::for('stripe', 'capture without payment_intent');
         }
@@ -77,9 +77,7 @@ final class StripePaymentGateway implements PaymentGateway
         $intent = $this->client->paymentIntents->capture(
             $intentId,
             ['amount_to_capture' => $data->amount->minorAmount],
-            $data->attempt->idempotency_key !== '' && $data->attempt->idempotency_key !== null
-                ? ['idempotency_key' => $data->attempt->idempotency_key]
-                : [],
+            $this->idempotencyOptions($data->attempt->idempotency_key, "capture:{$data->attempt->id}"),
         );
 
         return new PaymentResult(
@@ -92,7 +90,7 @@ final class StripePaymentGateway implements PaymentGateway
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $intentId = $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
+        $intentId = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
         if ($intentId === null) {
             throw PaymentOperationNotSupported::for('stripe', 'refund without payment_intent');
         }
@@ -100,7 +98,7 @@ final class StripePaymentGateway implements PaymentGateway
         $refund = $this->client->refunds->create([
             'payment_intent' => $intentId,
             'amount' => $data->amount->minorAmount,
-        ]);
+        ], $this->idempotencyOptions($data->attempt->idempotency_key, "refund:{$data->attempt->id}"));
 
         return new RefundResult(
             success: $refund->status === 'succeeded',
@@ -123,5 +121,13 @@ final class StripePaymentGateway implements PaymentGateway
             amountMinor: isset($object['amount']) ? (int) $object['amount'] : null,
             currency: isset($object['currency']) ? strtoupper((string) $object['currency']) : null,
         );
+    }
+
+    /** @return array<string, string> */
+    private function idempotencyOptions(?string $key, string $fallback): array
+    {
+        $idempotencyKey = $key !== null && $key !== '' ? $key : $fallback;
+
+        return ['idempotency_key' => $idempotencyKey];
     }
 }

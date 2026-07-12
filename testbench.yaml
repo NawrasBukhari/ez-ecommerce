@@ -1,0 +1,12 @@
+laravel: '@testbench'
+
+providers:
+  - EzEcommerce\EzEcommerceServiceProvider
+
+migrations:
+  - database/migrations
+
+dont-discover:
+  - orchestra/canvas
+  - orchestra/canvas-core
+  - orchestra/workbench

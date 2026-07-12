@@ -16,5 +16,6 @@ final readonly class RefundPaymentData
         public PaymentAttempt $attempt,
         public Money $amount,
         public array $metadata = [],
+        public ?string $providerReference = null,
     ) {}
 }

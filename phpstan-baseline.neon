@@ -319,6 +319,12 @@ parameters:
 			path: src/Checkout/Actions/PlaceOrder.php
 
 		-
+			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Commands/ReconcileFinalizationsCommand.php
+
+		-
 			message: '#^Access to an undefined property EzEcommerce\\Core\\Models\\IdempotencyRecord\:\:\$attempts\.$#'
 			identifier: property.notFound
 			count: 1
@@ -841,38 +847,8 @@ parameters:
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
 
 		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\RecalculateOrderPaymentStatus\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Payments/Actions/CapturePayment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$id\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
 			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Inventory\\Actions\\CommitReservation\:\:executeForOrder\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\ConfirmOrderOnPaymentAccepted\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 2
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\RecalculateOrderPaymentStatus\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
 			count: 1
 			path: src/Payments/Actions/FinalizeAcceptedPayment.php
 
@@ -880,18 +856,6 @@ parameters:
 			message: '#^Access to an undefined property EzEcommerce\\Webhooks\\Inbound\\Models\\ProcessedGatewayEvent\:\:\$status\.$#'
 			identifier: property.notFound
 			count: 2
-			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/ReconcilePayment.php
-
-		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\RecalculateOrderPaymentStatus\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 1
 			path: src/Payments/Actions/ReconcilePayment.php
 
 		-
@@ -919,12 +883,6 @@ parameters:
 			path: src/Payments/Drivers/PayPalPaymentGateway.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$external_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Drivers/PayPalPaymentGateway.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
@@ -951,7 +909,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
 			identifier: property.notFound
-			count: 3
+			count: 2
 			path: src/Payments/Drivers/TelrPaymentGateway.php
 
 		-
@@ -967,7 +925,7 @@ parameters:
 			path: src/Pricing/DefaultPriceResolver.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\Payment\:\:\$order_id\.$#'
+			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Refunds/Actions/RefundPayment.php
@@ -976,18 +934,6 @@ parameters:
 			message: '#^Access to an undefined property EzEcommerce\\Refunds\\Models\\Refund\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 2
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
-
-		-
-			message: '#^Parameter \#1 \$order of method EzEcommerce\\Orders\\Actions\\RecalculateOrderPaymentStatus\:\:execute\(\) expects EzEcommerce\\Orders\\Models\\Order, Illuminate\\Database\\Eloquent\\Model\|null given\.$#'
-			identifier: argument.type
-			count: 3
 			path: src/Refunds/Actions/RefundPayment.php
 
 		-

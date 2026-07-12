@@ -86,13 +86,13 @@ final class TelrPaymentGateway implements PaymentGateway
             success: true,
             status: PaymentStatus::Captured,
             amount: $data->amount,
-            externalId: $data->attempt->external_id ?? 'telr_capture_'.$data->attempt->public_id,
+            externalId: $data->providerReference ?? $data->attempt->external_id ?? 'telr_capture_'.$data->attempt->id,
         );
     }
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $ref = $data->attempt->external_id ?? ($data->payment->metadata['telr_ref'] ?? null);
+        $ref = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['telr_ref'] ?? null);
         if ($ref === null || $ref === '') {
             throw PaymentOperationNotSupported::for('telr', 'refund without order ref');
         }

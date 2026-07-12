@@ -14,5 +14,6 @@ final readonly class CapturePaymentData
         public PaymentAttempt $attempt,
         public Money $amount,
         public array $metadata = [],
+        public ?string $providerReference = null,
     ) {}
 }

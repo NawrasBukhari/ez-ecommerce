@@ -11,6 +11,7 @@ use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Payments\Actions\ResolveProviderPaymentReference;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Models\Payment;
@@ -29,6 +30,7 @@ final class RefundPayment
     public function __construct(
         private readonly Clock $clock,
         private readonly PaymentGatewayRegistry $gateways,
+        private readonly ResolveProviderPaymentReference $providerReference,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
     ) {}
 
@@ -121,6 +123,9 @@ final class RefundPayment
                 'request_metadata' => [
                     'refund_id' => $refund->id,
                     'payload_hash' => $payloadHash,
+                    'requested_amount_minor' => $amount->minorAmount,
+                    'currency' => $amount->currency,
+                    'provider_operation' => 'refund',
                 ],
             ]);
 
@@ -131,7 +136,13 @@ final class RefundPayment
 
         try {
             $result = $this->gateways->for($payment->gateway)->refund(
-                new RefundPaymentData($payment, $refund, $attempt, $amount),
+                new RefundPaymentData(
+                    payment: $payment,
+                    refund: $refund,
+                    attempt: $attempt,
+                    amount: $amount,
+                    providerReference: $this->providerReference->forRefund($payment),
+                ),
             );
         } catch (\Throwable $e) {
             $attempt->update([
@@ -143,6 +154,17 @@ final class RefundPayment
             throw $e;
         }
 
+        return DB::transaction(function () use ($payment, $refund, $attempt, $result) {
+            return $this->finalizeRefundAttempt($payment, $refund, $attempt, $result);
+        });
+    }
+
+    public function finalizeProviderRefund(
+        Payment $payment,
+        Refund $refund,
+        PaymentAttempt $attempt,
+        RefundResult $result,
+    ): Refund {
         return DB::transaction(function () use ($payment, $refund, $attempt, $result) {
             return $this->finalizeRefundAttempt($payment, $refund, $attempt, $result);
         });
@@ -252,7 +274,13 @@ final class RefundPayment
 
         try {
             $result = $this->gateways->for($payment->gateway)->refund(
-                new RefundPaymentData($payment, $refund, $attempt, $amount),
+                new RefundPaymentData(
+                    payment: $payment,
+                    refund: $refund,
+                    attempt: $attempt,
+                    amount: $amount,
+                    providerReference: $this->providerReference->forRefund($payment),
+                ),
             );
         } catch (\Throwable $e) {
             $attempt->update([

@@ -13,6 +13,7 @@ use EzEcommerce\Checkout\CheckoutServiceProvider;
 use EzEcommerce\Commands\CommerceInstallCommand;
 use EzEcommerce\Commands\PurgeExpiredCartsCommand;
 use EzEcommerce\Commands\PurgeIdempotencyRecordsCommand;
+use EzEcommerce\Commands\ReconcileFinalizationsCommand;
 use EzEcommerce\Commands\ReconcilePaymentsCommand;
 use EzEcommerce\Commands\ReconcileRefundsCommand;
 use EzEcommerce\Commands\ReleaseExpiredReservationsCommand;
@@ -104,7 +105,8 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
             ->hasCommand(PurgeExpiredCartsCommand::class)
             ->hasCommand(PurgeIdempotencyRecordsCommand::class)
             ->hasCommand(ReconcilePaymentsCommand::class)
-            ->hasCommand(ReconcileRefundsCommand::class);
+            ->hasCommand(ReconcileRefundsCommand::class)
+            ->hasCommand(ReconcileFinalizationsCommand::class);
     }
 
     public function packageRegistered(): void

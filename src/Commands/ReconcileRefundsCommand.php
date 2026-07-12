@@ -3,9 +3,11 @@
 namespace EzEcommerce\Commands;
 
 use EzEcommerce\Payments\Models\PaymentAttempt;
-use EzEcommerce\Refunds\Actions\RefundPayment;
+use EzEcommerce\Payments\Support\PaymentAttemptRequest;
+use EzEcommerce\Refunds\Actions\ReconcileRefundAttempt;
 use EzEcommerce\Refunds\Models\Refund;
 use Illuminate\Console\Command;
+use InvalidArgumentException;
 use RuntimeException;
 
 class ReconcileRefundsCommand extends Command
@@ -14,12 +16,13 @@ class ReconcileRefundsCommand extends Command
         {attempt? : Payment attempt ID to reconcile}
         {--list : List refund attempts requiring reconciliation}
         {--retry : Retry an unknown refund using the same idempotency key}
-        {--mark-succeeded : Mark an unknown refund as succeeded without contacting the gateway}
-        {--mark-failed : Mark an unknown refund as failed}';
+        {--mark-succeeded : Record a provider-confirmed refund in the ledger}
+        {--mark-failed : Mark an unknown refund as failed}
+        {--external-id= : Provider refund transaction ID (required with --mark-succeeded)}';
 
     protected $description = 'List or reconcile unknown refund attempts';
 
-    public function handle(RefundPayment $refundPayment): int
+    public function handle(ReconcileRefundAttempt $reconcileRefundAttempt): int
     {
         if ($this->option('list') || $this->argument('attempt') === null) {
             $attempts = PaymentAttempt::query()
@@ -35,10 +38,12 @@ class ReconcileRefundsCommand extends Command
             }
 
             $this->table(
-                ['id', 'payment_id', 'idempotency_key', 'error_code', 'updated_at'],
+                ['id', 'payment_id', 'amount_minor', 'currency', 'idempotency_key', 'error_code', 'updated_at'],
                 $attempts->map(fn (PaymentAttempt $attempt) => [
                     $attempt->id,
                     $attempt->payment_id,
+                    PaymentAttemptRequest::metadata($attempt)['requested_amount_minor'] ?? null,
+                    PaymentAttemptRequest::metadata($attempt)['currency'] ?? null,
                     $attempt->idempotency_key,
                     $attempt->error_code,
                     $attempt->updated_at,
@@ -48,15 +53,20 @@ class ReconcileRefundsCommand extends Command
             return self::SUCCESS;
         }
 
-        $attempt = PaymentAttempt::query()->findOrFail((int) $this->argument('attempt'));
+        $attempt = PaymentAttempt::query()->with('payment')->findOrFail((int) $this->argument('attempt'));
 
         if ($attempt->operation !== 'refund' || $attempt->status !== 'unknown') {
             throw new RuntimeException('Attempt is not an unknown refund.');
         }
 
         if ($this->option('mark-succeeded')) {
-            $attempt->update(['status' => 'succeeded', 'error_code' => null, 'error_message' => null]);
-            $this->components->info("Refund attempt [{$attempt->id}] marked succeeded.");
+            $externalId = $this->option('external-id');
+            if ($externalId === null || $externalId === '') {
+                throw new InvalidArgumentException('--mark-succeeded requires --external-id.');
+            }
+
+            $reconcileRefundAttempt->confirmProviderSucceeded($attempt, (string) $externalId);
+            $this->components->info("Refund attempt [{$attempt->id}] recorded in the ledger.");
 
             return self::SUCCESS;
         }
@@ -65,7 +75,7 @@ class ReconcileRefundsCommand extends Command
             $refundId = $this->refundIdFromAttempt($attempt);
 
             if ($refundId !== null) {
-                Refund::query()->whereKey((int) $refundId)->update(['status' => 'failed']);
+                Refund::query()->whereKey($refundId)->update(['status' => 'failed']);
             }
 
             $attempt->update(['status' => 'failed']);
@@ -75,7 +85,7 @@ class ReconcileRefundsCommand extends Command
         }
 
         if ($this->option('retry')) {
-            $refundPayment->retryUnknown($attempt);
+            $reconcileRefundAttempt->retry($attempt);
             $this->components->info("Refund attempt [{$attempt->id}] retried.");
 
             return self::SUCCESS;
@@ -88,10 +98,7 @@ class ReconcileRefundsCommand extends Command
 
     private function refundIdFromAttempt(PaymentAttempt $attempt): ?int
     {
-        $metadata = $attempt->request_metadata instanceof \ArrayObject
-            ? $attempt->request_metadata->getArrayCopy()
-            : (array) ($attempt->request_metadata ?? []);
-        $refundId = $metadata['refund_id'] ?? null;
+        $refundId = PaymentAttemptRequest::metadata($attempt)['refund_id'] ?? null;
 
         return $refundId === null ? null : (int) $refundId;
     }

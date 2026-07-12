@@ -2,9 +2,11 @@
 
 namespace EzEcommerce\Commands;
 
-use EzEcommerce\Payments\Actions\CapturePayment;
+use EzEcommerce\Payments\Actions\ReconcileCaptureAttempt;
 use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use Illuminate\Console\Command;
+use InvalidArgumentException;
 use RuntimeException;
 
 class ReconcilePaymentsCommand extends Command
@@ -13,12 +15,15 @@ class ReconcilePaymentsCommand extends Command
         {attempt? : Payment attempt ID to reconcile}
         {--list : List capture attempts requiring reconciliation}
         {--retry : Retry an unknown capture using the same idempotency key}
-        {--mark-succeeded : Mark an unknown capture as succeeded without contacting the gateway}
-        {--mark-failed : Mark an unknown capture as failed}';
+        {--mark-succeeded : Record a provider-confirmed capture in the ledger}
+        {--mark-failed : Mark an unknown capture as failed}
+        {--amount= : Captured amount in minor units (required with --mark-succeeded)}
+        {--currency= : Capture currency (required with --mark-succeeded)}
+        {--external-id= : Provider capture transaction ID (required with --mark-succeeded)}';
 
     protected $description = 'List or reconcile unknown payment capture attempts';
 
-    public function handle(CapturePayment $capturePayment): int
+    public function handle(ReconcileCaptureAttempt $reconcileCaptureAttempt): int
     {
         if ($this->option('list') || $this->argument('attempt') === null) {
             $attempts = PaymentAttempt::query()
@@ -34,10 +39,12 @@ class ReconcilePaymentsCommand extends Command
             }
 
             $this->table(
-                ['id', 'payment_id', 'idempotency_key', 'error_code', 'updated_at'],
+                ['id', 'payment_id', 'amount_minor', 'currency', 'idempotency_key', 'error_code', 'updated_at'],
                 $attempts->map(fn (PaymentAttempt $attempt) => [
                     $attempt->id,
                     $attempt->payment_id,
+                    PaymentAttemptRequest::metadata($attempt)['requested_amount_minor'] ?? null,
+                    PaymentAttemptRequest::metadata($attempt)['currency'] ?? null,
                     $attempt->idempotency_key,
                     $attempt->error_code,
                     $attempt->updated_at,
@@ -54,8 +61,10 @@ class ReconcilePaymentsCommand extends Command
         }
 
         if ($this->option('mark-succeeded')) {
-            $attempt->update(['status' => 'succeeded', 'error_code' => null, 'error_message' => null]);
-            $this->components->info("Capture attempt [{$attempt->id}] marked succeeded.");
+            [$amountMinor, $currency, $externalId] = $this->verifiedProviderCapture();
+
+            $reconcileCaptureAttempt->confirmProviderSucceeded($attempt, $amountMinor, $currency, $externalId);
+            $this->components->info("Capture attempt [{$attempt->id}] recorded in the ledger.");
 
             return self::SUCCESS;
         }
@@ -68,12 +77,7 @@ class ReconcilePaymentsCommand extends Command
         }
 
         if ($this->option('retry')) {
-            $payment = $attempt->payment;
-            if ($payment === null) {
-                throw new RuntimeException("Capture attempt [{$attempt->id}] is missing its payment.");
-            }
-
-            $capturePayment->execute($payment, $attempt);
+            $reconcileCaptureAttempt->retry($attempt);
             $this->components->info("Capture attempt [{$attempt->id}] retried.");
 
             return self::SUCCESS;
@@ -82,5 +86,19 @@ class ReconcilePaymentsCommand extends Command
         $this->components->warn('Specify --retry, --mark-succeeded, or --mark-failed.');
 
         return self::INVALID;
+    }
+
+    /** @return array{0: int, 1: string, 2: string} */
+    private function verifiedProviderCapture(): array
+    {
+        $amount = $this->option('amount');
+        $currency = $this->option('currency');
+        $externalId = $this->option('external-id');
+
+        if ($amount === null || $currency === null || $externalId === null || $externalId === '') {
+            throw new InvalidArgumentException('--mark-succeeded requires --amount, --currency, and --external-id.');
+        }
+
+        return [(int) $amount, (string) $currency, (string) $externalId];
     }
 }

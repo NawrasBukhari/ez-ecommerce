@@ -7,6 +7,9 @@ use EzEcommerce\Core\Models\CommerceModel;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property string|null $external_id
+ */
 class PaymentTransaction extends CommerceModel
 {
     protected $table = 'commerce_payment_transactions';

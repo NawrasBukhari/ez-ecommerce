@@ -224,6 +224,15 @@ final class PlaceOrder
                 'error_code' => 'finalization_exception',
                 'error_message' => $e->getMessage(),
             ]);
+            $payment = $commercial['payment']->fresh();
+            if (in_array($payment->status, [PaymentStatus::Captured, PaymentStatus::PartiallyCaptured], true)) {
+                $order = $commercial['order'];
+                $orderMetadata = $order->metadata instanceof \ArrayObject
+                    ? $order->metadata->getArrayCopy()
+                    : (array) ($order->metadata ?? []);
+                $orderMetadata['manual_review_required'] = 'inventory_exception';
+                $order->update(['metadata' => $orderMetadata]);
+            }
             $paymentFailure = new PaymentFailure('finalization_exception', $e->getMessage(), false);
             $status = CheckoutStatus::FinalizationFailed;
         } catch (\Throwable $e) {

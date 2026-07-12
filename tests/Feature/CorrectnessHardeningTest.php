@@ -15,10 +15,12 @@ use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Payments\Actions\ApplyPaymentCapture;
 use EzEcommerce\Payments\Actions\CapturePayment;
 use EzEcommerce\Payments\Actions\FinalizeAcceptedPayment;
+use EzEcommerce\Payments\Actions\ReconcileCaptureAttempt;
 use EzEcommerce\Payments\Data\PaymentFailure;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
 use Illuminate\Support\Facades\Event;
@@ -288,4 +290,67 @@ it('rejects refund idempotency key reuse with a different amount', function () {
         'partial',
         $key,
     ))->toThrow(IdempotencyPayloadMismatchException::class);
+})->group('hardening');
+
+it('records provider-confirmed unknown capture in the ledger', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 5000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'ledger-cap-'.uniqid());
+
+    $payment = $result->payment->fresh();
+    $attempt = PaymentAttempt::query()->where('payment_id', $payment->id)->first();
+    $attempt->update([
+        'operation' => 'capture',
+        'status' => 'unknown',
+        'idempotency_key' => 'ledger-cap-attempt',
+    ]);
+    PaymentAttemptRequest::merge($attempt, [
+        'requested_amount_minor' => $payment->amount_minor,
+        'currency' => $payment->currency,
+        'provider_operation' => 'capture',
+    ]);
+
+    app(ReconcileCaptureAttempt::class)
+        ->confirmProviderSucceeded($attempt->fresh(), $payment->amount_minor, $payment->currency, 'provider_capture_1');
+
+    $payment = $payment->fresh();
+    expect($payment->captured_minor)->toBe($payment->amount_minor);
+    expect($payment->status)->toBe(PaymentStatus::Captured);
+    expect($result->order->fresh()->status)->toBe(OrderStatus::Confirmed);
+})->group('hardening');
+
+it('retries unknown capture using the stored request amount snapshot', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'snapshot-cap-'.uniqid());
+
+    $payment = $result->payment;
+    app(ApplyPaymentCapture::class)->execute($payment, null, 3000, 'AED', 'partial-1');
+
+    $attempt = PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'capture',
+        'status' => 'unknown',
+        'idempotency_key' => 'snapshot-cap-attempt',
+    ]);
+    PaymentAttemptRequest::merge($attempt, [
+        'requested_amount_minor' => 4000,
+        'currency' => 'AED',
+        'provider_operation' => 'capture',
+    ]);
+
+    $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
+        captureResult: new PaymentResult(
+            success: true,
+            status: PaymentStatus::Captured,
+            amount: Money::fromMinor(4000, 'AED'),
+            externalId: 'snapshot_capture_ok',
+        ),
+    ));
+
+    app(ReconcileCaptureAttempt::class)->retry($attempt->fresh());
+
+    expect($payment->fresh()->captured_minor)->toBe(7000);
 })->group('hardening');

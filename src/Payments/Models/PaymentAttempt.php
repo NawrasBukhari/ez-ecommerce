@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
  * @property string $operation
  * @property string|null $idempotency_key
  * @property string $status
+ * @property string|null $external_id
  * @property string|null $error_code
  * @property ArrayObject<int|string, mixed>|null $request_metadata
  * @property ArrayObject<int|string, mixed>|null $response_metadata

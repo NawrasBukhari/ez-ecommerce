@@ -57,6 +57,7 @@ final class PayPalPaymentGateway implements PaymentGateway
     {
         $token = $this->accessToken();
         $response = Http::withToken($token)
+            ->withHeaders($this->requestIdHeaders($data->attempt->idempotency_key, "session:{$data->attempt->id}"))
             ->post("{$this->baseUrl}/v2/checkout/orders", [
                 'intent' => 'CAPTURE',
                 'purchase_units' => [[
@@ -82,13 +83,14 @@ final class PayPalPaymentGateway implements PaymentGateway
 
     public function capture(CapturePaymentData $data): PaymentResult
     {
-        $orderId = $data->attempt->external_id;
+        $orderId = $data->providerReference ?? $data->attempt->external_id;
         if ($orderId === null) {
             throw PaymentOperationNotSupported::for('paypal', 'capture without order id');
         }
 
         $token = $this->accessToken();
         $response = Http::withToken($token)
+            ->withHeaders($this->requestIdHeaders($data->attempt->idempotency_key, "capture:{$data->attempt->id}"))
             ->post("{$this->baseUrl}/v2/checkout/orders/{$orderId}/capture")
             ->throw();
 
@@ -105,13 +107,14 @@ final class PayPalPaymentGateway implements PaymentGateway
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        $captureId = $data->attempt->external_id ?? ($data->payment->metadata['paypal_capture_id'] ?? null);
+        $captureId = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['paypal_capture_id'] ?? null);
         if ($captureId === null) {
             throw PaymentOperationNotSupported::for('paypal', 'refund without capture id');
         }
 
         $token = $this->accessToken();
         $response = Http::withToken($token)
+            ->withHeaders($this->requestIdHeaders($data->attempt->idempotency_key, "refund:{$data->attempt->id}"))
             ->post("{$this->baseUrl}/v2/payments/captures/{$captureId}/refund", [
                 'amount' => [
                     'currency_code' => $data->amount->currency,
@@ -187,5 +190,11 @@ final class PayPalPaymentGateway implements PaymentGateway
             ->throw();
 
         return (string) $response->json('access_token');
+    }
+
+    /** @return array<string, string> */
+    private function requestIdHeaders(?string $key, string $fallback): array
+    {
+        return ['PayPal-Request-Id' => $key !== null && $key !== '' ? $key : $fallback];
     }
 }

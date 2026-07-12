@@ -15,10 +15,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property PaymentStatus $status
  * @property string $gateway
  * @property string $currency
+ * @property int $order_id
  * @property int $amount_minor
  * @property int $captured_minor
  * @property int $refunded_minor
  * @property ArrayObject<int|string, mixed>|null $metadata
+ * @property-read Order|null $order
  */
 class Payment extends CommerceModel
 {
