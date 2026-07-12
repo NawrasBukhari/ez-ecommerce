@@ -3,6 +3,7 @@
 namespace EzEcommerce\Payments\Drivers;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Enums\RefundStatus;
 use EzEcommerce\Payments\Contracts\PaymentGateway;
 use EzEcommerce\Payments\Data\CapturePaymentData;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
@@ -91,7 +92,31 @@ final class TelrPaymentGateway implements PaymentGateway
 
     public function refund(RefundPaymentData $data): RefundResult
     {
-        throw PaymentOperationNotSupported::for('telr', 'refund');
+        $ref = $data->attempt->external_id ?? $data->payment->metadata?->get('telr_ref');
+        if ($ref === null || $ref === '') {
+            throw PaymentOperationNotSupported::for('telr', 'refund without order ref');
+        }
+
+        $response = Http::post($this->endpoint, [
+            'method' => 'refund',
+            'store' => $this->storeId,
+            'authkey' => $this->authKey,
+            'order' => [
+                'ref' => $ref,
+                'amount' => number_format($data->amount->minorAmount / 100, 2, '.', ''),
+            ],
+        ]);
+
+        $body = $response->json();
+        $accepted = ($body['order']['status'] ?? '') === 'accepted'
+            || ($body['order']['message'] ?? '') === 'Accepted';
+
+        return new RefundResult(
+            success: $accepted || $response->successful(),
+            status: RefundStatus::Succeeded,
+            amount: $data->amount,
+            externalId: $body['order']['ref'] ?? ('telr_refund_'.$data->attempt->public_id),
+        );
     }
 
     public function parseWebhook(WebhookRequestData $data): GatewayWebhookEvent

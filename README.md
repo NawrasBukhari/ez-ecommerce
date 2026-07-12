@@ -65,8 +65,13 @@ COMMERCE_CURRENCY=AED
 COMMERCE_TAX_RATE=0.05
 COMMERCE_SHIPPING_FLAT_MINOR=1000
 COMMERCE_PAYMENT_DRIVER=manual
-COMMERCE_DEFAULT_STORE_ID=
+COMMERCE_API_TOKEN=your-strong-token
+COMMERCE_API_ALLOW_UNAUTHENTICATED=false
+COMMERCE_INBOUND_WEBHOOK_SECRET=
+COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED=false
 COMMERCE_WEBHOOK_SECRET=
+STRIPE_SECRET=
+STRIPE_WEBHOOK_SECRET=
 ```
 
 ---
@@ -112,8 +117,9 @@ These paths are implemented, wired, and covered by at least one test on the happ
 | Guest carts | `EzEcommerce::cart()->createGuest()` | Returns `guest_token` for API/header auth |
 | Cart items | `addItem`, `updateItem`, `removeItem` | Optimistic locking via `expected_version` |
 | Cart totals | `calculateTotals`, `totalsHash` | Flat shipping + simple % tax + adjustments |
-| Discount codes | `applyDiscount` on CartManager / API | Percent and fixed types |
+| Discount codes | `applyDiscount` / `removeDiscount` on CartManager + API | Percent, fixed; date validation |
 | Checkout | `checkout()->for($cart)->place()` | Idempotent; returns `CheckoutResult` |
+| Cart merge | `CartManager::merge()` + `POST /cart/merge` | Guest → customer cart on login |
 | Orders | Snapshots on line items | Immutable product data at purchase time |
 | Inventory | Reserve → commit on payment | Signed movements; race-safe expiry release |
 | Manual capture | `CapturePayment` action / API | After `manual` gateway pending session |
@@ -136,31 +142,34 @@ These paths are implemented, wired, and covered by at least one test on the happ
 | `null` | Production-ready | Free / zero-total orders only |
 | `fake` | Test-only | Deterministic test doubles |
 | `net_terms` | B2B-ready | Defers capture; stores payment terms on order |
-| `stripe` | Partial | Sessions; optional SDK; verify webhooks yourself |
-| `paypal` | Partial | HTTP integration; no webhook verification |
-| `telr` | Partial | Order creation; capture/refund incomplete |
+| `stripe` | Partial | Sessions; Stripe signature webhook verify when secret set |
+| `paypal` | Partial | HTTP checkout; inbound webhooks via shared secret |
+| `telr` | Partial | Order creation + refund HTTP; capture optimistic |
 
 ### REST API (`api/ez-commerce/v1`)
 
-Enabled when `features.api` is `true` (default).
+Enabled when `features.api` is `true` (default). See [REST API](#rest-api) for the full route table.
 
-| Endpoint | Works |
-|----------|-------|
-| `GET /products`, `GET /products/{id}`, `GET /products/{id}/variants` | Yes |
-| `POST /cart/guest` | Yes — returns `guest_token` |
-| Cart CRUD + calculate + discount | Yes — requires `X-Guest-Cart-Token` |
-| `POST /checkout` | Yes — requires `Idempotency-Key` |
-| `GET /orders/{id}`, capture, fulfill, refund | Yes — **no auth middleware** (you must add it) |
+| Area | Status |
+|------|--------|
+| Products, guest cart, checkout | Public / guest-token auth |
+| Orders (show, capture, fulfill, refund, retry-payment) | Bearer token |
+| Returns (create, receive, restock, mark-damaged) | Bearer token |
+| Customers + addresses | Bearer token |
+| Stores, companies, vendors, subscriptions | Bearer token |
+| Cart merge | Bearer token + guest token in body |
+| Inbound webhooks (`stripe`, `paypal`, `telr`) | Signature / shared secret |
 
-### Optional modules (scaffolding + real actions)
+### Optional modules
 
 | Module | What works | Limit |
 |--------|------------|-------|
-| **Subscriptions** | `CreateSubscription`, `RenewSubscription`, `commerce:renew-subscriptions` | Period dates only — **no billing charge** |
-| **Marketplace** | `RecordVendorCommissions` on order create | No vendor API or payouts |
-| **Multi-store** | `StoreContext`, `store_id` on cart/order, `X-Commerce-Store` header | No store management API |
-| **B2B** | `Company` model, `net_terms` payment, terms metadata on order | No company CRUD API |
-| **Outbound webhooks** | Signed POST on `OrderPlaced` / `OrderPaid` | Config URL list only; DB endpoint table unused |
+| **Subscriptions** | CRUD API, `BillSubscriptionPeriod` on renew command | Manual capture billing; no PSP dunning |
+| **Marketplace** | Commission rows, vendor API, `vendor_id` on variants | No payout automation |
+| **Multi-store** | `StoreContext`, `store_id`, stores API, `X-Commerce-Store` | No per-store policy engine |
+| **B2B** | Companies API, `net_terms`, payment terms on order | No credit limits |
+| **Outbound webhooks** | Outbox + `DeliverWebhookJob` + config/DB endpoints | Host runs queue worker |
+| **Inbound webhooks** | `POST /webhooks/{gateway}` + `ReconcilePayment` | PayPal uses shared secret, not native verify |
 
 ### Artisan commands
 
@@ -174,53 +183,40 @@ php artisan commerce:renew-subscriptions
 
 ## What you CANNOT expect yet
 
-Be honest with your sprint planning. These are **not** production-complete:
-
 ### No built-in UI
 
 This is a **headless engine**. No storefront, admin panel, product editor, or checkout page. You build those in your app.
 
-### Security (host app still responsible for)
+### Security (production checklist)
 
-- Set `COMMERCE_API_TOKEN` — order/admin endpoints require `Authorization: Bearer {token}` or `X-Commerce-Api-Token`
-- Guest cart auth is token-only (`X-Guest-Cart-Token`)
-- Stripe webhooks verify `Stripe-Signature` when `STRIPE_WEBHOOK_SECRET` is set
+| Variable | Purpose |
+|----------|---------|
+| `COMMERCE_API_TOKEN` | Required for order/admin API; empty token → **503** on protected routes |
+| `COMMERCE_API_ALLOW_UNAUTHENTICATED` | `true` only for local dev — opens admin routes without token |
+| `COMMERCE_INBOUND_WEBHOOK_SECRET` | Required for PayPal/Telr webhooks (header `X-Commerce-Webhook-Secret`) |
+| `STRIPE_WEBHOOK_SECRET` | Required for Stripe webhooks (`Stripe-Signature` header) |
+| Guest checkout | `X-Guest-Cart-Token` on cart mutations + checkout |
 
-### Payment / webhook gaps
+`fake` / `null` / `manual` inbound webhook gateways register only in `local` and `testing`.
+
+### Remaining API gaps
+
+- Customer cart creation endpoint (merge expects an existing customer cart)
+- Inventory admin REST API
+- Product/catalog write API
+
+### Remaining product gaps
 
 | Item | Status |
 |------|--------|
-| `ReconcilePayment` | Action exists, **no HTTP entry point** |
-| `RetryPaymentSession` | Action exists, **not exposed** |
-| Telr `capture()` / `refund()` | Incomplete |
-| `drivers.payment.stripe.webhook_secret` | Config exists, **unused in code** |
+| Marketplace payouts | Not implemented |
+| Native PayPal webhook signatures | Shared-secret gate only |
+| `currency.rounding` config | Defined, never read |
+| Per-route API RBAC | Single shared admin token |
 
-### API gaps
+### Unwired by design
 
-No REST routes for: customers, addresses, subscriptions, vendors, companies, stores, returns, inventory admin, inbound webhooks, cart merge.
-
-### Feature scaffolding vs product
-
-| Advertised | Reality |
-|------------|---------|
-| Subscriptions | `BillSubscriptionPeriod` on renew + manual auto-capture; API CRUD |
-| Marketplace | Commission rows + vendor API; `vendor_id` on products |
-| Multi-store | `store_id` + header; stores API |
-| B2B | `net_terms` + companies API |
-| Outbound webhooks | Outbox + DB endpoints + delivery tracking |
-
-### Config keys that do nothing today
-
-- `currency.rounding` — defined, never read
-- `drivers.shipping.default` — hard-bound to `FlatShippingCalculator`
-- `drivers.tax.default` — hard-bound to `SimpleTaxCalculator`
-
-### Duplicate / unwired code
-
-- Two `ApplyDiscountCode` classes: `Cart\Actions\` (used by manager/API) vs `Discounts\Actions\` (has date validation, **not used by manager**)
-- `RemoveDiscountCode` — exists, **not on CartManager or API**
-- `MarkReturnedItemAsDamaged` — exists, **no caller**
-- `OrderManager` (fulfill) is **not** on the `EzEcommerce` facade — inject it or use API
+- `OrderManager` (fulfill) is **not** on the `EzEcommerce` facade — use API or DI
 
 ---
 
@@ -277,6 +273,7 @@ EzEcommerce::morphMap([...]) // Register morph aliases
 | `updateItem($cart, $item, $qty, $version?)` | Change quantity |
 | `removeItem($cart, $item, $version?)` | Remove line |
 | `applyDiscount($cart, $code, $version?)` | Apply promo code |
+| `removeDiscount($cart, $code?, $version?)` | Remove promo adjustment |
 | `calculateTotals($cart, $shipping?, $address?, $version?)` | Recalc all totals |
 | `totalsHash($cart, $shipping?)` | Hash for checkout optimistic lock |
 | `merge($guestCart, $customerCart)` | Merge guest into customer cart |
@@ -319,31 +316,62 @@ EzEcommerce::checkout()->for($cart)
 
 | Route group | Auth |
 |-------------|------|
-| Products | Public |
-| `POST /cart/guest` | Public |
-| Cart mutations | `X-Guest-Cart-Token` header |
-| Checkout | `Idempotency-Key` header (required) |
-| Orders | **None built-in — add your own** |
+| Products, `POST /cart/guest` | Public |
+| Cart mutations | `X-Guest-Cart-Token` |
+| `POST /checkout` | `X-Guest-Cart-Token` + `Idempotency-Key` |
+| Orders, returns, customers, admin, cart merge | `Authorization: Bearer {COMMERCE_API_TOKEN}` or `X-Commerce-Api-Token` |
+| Inbound webhooks | Stripe signature or `X-Commerce-Webhook-Secret` |
 
-### Endpoints
+### Public & guest routes
 
 | Method | Path | Body / headers |
 |--------|------|----------------|
 | `GET` | `/products` | — |
 | `GET` | `/products/{id\|slug}` | — |
 | `GET` | `/products/{id}/variants` | — |
-| `POST` | `/cart/guest` | `{ "currency": "AED" }` |
+| `POST` | `/cart/guest` | `{ "currency": "AED" }` → returns `guest_token` |
 | `GET` | `/cart/{id}` | `X-Guest-Cart-Token` |
 | `POST` | `/cart/{id}/items` | `{ "variant_id", "quantity", "expected_version"? }` |
 | `PATCH` | `/cart/{id}/items/{itemId}` | `{ "quantity" }` |
 | `DELETE` | `/cart/{id}/items/{itemId}` | — |
 | `POST` | `/cart/{id}/discount` | `{ "code" }` |
+| `DELETE` | `/cart/{id}/discount` | `{ "code"? }` |
 | `POST` | `/cart/{id}/calculate` | `{ "shipping_method" }` |
 | `POST` | `/checkout` | `{ "cart_id", "shipping_method", "payment_method" }` + headers |
+
+### Protected routes (bearer token)
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `POST` | `/cart/merge` | `{ "guest_cart_id", "customer_cart_id", "guest_token" }` |
 | `GET` | `/orders/{id}` | — |
-| `POST` | `/orders/{id}/capture` | — |
+| `POST` | `/orders/{id}/capture` | Manual gateway capture |
 | `POST` | `/orders/{id}/fulfill` | `{ "order_item_id", "quantity" }` |
-| `POST` | `/orders/{id}/refund` | `{ "amount_minor" }` |
+| `POST` | `/orders/{id}/refund` | `{ "amount_minor", "reason"? }` |
+| `POST` | `/orders/{id}/retry-payment` | Re-create payment session |
+| `POST` | `/orders/{id}/returns` | `{ "reason"?, "lines": [{ "order_item_id", "quantity", "restock"? }] }` |
+| `GET` | `/returns` | Paginated list |
+| `GET` | `/returns/{id}` | — |
+| `POST` | `/returns/{id}/receive` | Mark received |
+| `POST` | `/returns/{id}/items/{itemId}/restock` | `{ "warehouse_id"?, "idempotency_key"? }` |
+| `POST` | `/returns/{id}/items/{itemId}/mark-damaged` | — |
+| `GET` | `/customers` | — |
+| `POST` | `/customers` | `{ "email", "first_name"?, ... }` |
+| `GET` | `/customers/{id}` | Includes addresses |
+| `GET/POST` | `/customers/{id}/addresses` | Address CRUD (POST uses `country` → `country_code`) |
+| `GET` | `/stores`, `POST /stores`, `GET /stores/{id}` | Multi-store |
+| `GET` | `/companies`, `POST /companies`, `GET /companies/{id}` | B2B |
+| `GET` | `/vendors`, `POST /vendors`, `GET /vendors/{id}` | Marketplace |
+| `GET` | `/subscriptions`, `POST /subscriptions`, `GET /subscriptions/{id}` | Subscriptions |
+
+### Webhooks
+
+| Method | Path | Auth |
+|--------|------|------|
+| `POST` | `/webhooks/stripe` | `Stripe-Signature` + `STRIPE_WEBHOOK_SECRET` |
+| `POST` | `/webhooks/paypal` | `X-Commerce-Webhook-Secret` |
+| `POST` | `/webhooks/telr` | `X-Commerce-Webhook-Secret` |
+| `POST` | `/webhooks/fake` | Local/testing only |
 
 **Multi-store:** send `X-Commerce-Store` with store `public_id` or `slug`.
 
@@ -401,7 +429,9 @@ Disabling a flag does **not** skip migrations — tables still exist.
 | `inventory.reservation_ttl.*` | Minutes to hold stock per payment method |
 | `cart.guest_ttl_days` | Guest cart expiry |
 | `multi_store.default_store_id` | Fallback store when no header |
+| `api.token` / `api.allow_unauthenticated` | REST bearer auth |
 | `api.prefix` / `api.middleware` | REST API routing |
+| `inbound_webhooks.shared_secret` / `allow_unsigned` | PayPal/Telr webhook auth |
 | `outbound_webhooks.secret` | HMAC signing key |
 | `outbound_webhooks.endpoints` | `[['url' => '...', 'events' => [...]]]` |
 | `idempotency.ttl_minutes` | Idempotency record lifetime |
@@ -416,7 +446,7 @@ Publish config: `php artisan vendor:publish --tag=ez-ecommerce-config`
 ```bash
 php artisan commerce:install                      # Publish config + translations
 php artisan commerce:release-expired-reservations # Release stale inventory holds
-php artisan commerce:renew-subscriptions          # Roll subscription periods (no charge)
+php artisan commerce:renew-subscriptions          # Renew periods + bill via BillSubscriptionPeriod
 ```
 
 **Recommended scheduler** (in your app's `routes/console.php`):
@@ -486,33 +516,29 @@ vendor/bin/phpstan analyse
 
 ## Test coverage honesty
 
-**32 tests. 6 files.** Core path + extended API, webhooks, subscriptions, marketplace, discounts.
+**42 tests. 8 files.** Core commerce, API, security, webhooks, subscriptions, marketplace, returns, sprint endpoints.
 
 | Test file | Coverage |
 |-----------|----------|
 | `CommerceFlowTest` | Boot, features, cart→checkout, idempotency, money |
 | `HardeningTest` | Capture, fulfill, refund, idempotency replay, OOS, null gateway |
 | `ApiTest` | Products, guest cart, checkout validation |
-| `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions API |
+| `SecurityTest` | Fail-closed API token, checkout cart token, webhook auth, capture allowlist |
+| `ApiExtendedTest` | API token auth, order capture/fulfill, discount CRUD, stores/companies/vendors/subscriptions |
+| `SprintApiTest` | Customers, addresses, cart merge, retry payment, returns API |
 | `ModulesTest` | Discounts, pricing, subscriptions, returns, money allocate |
 | `ModulesExtendedTest` | Outbox webhooks, inbound webhooks, fake gateway, renew+bill, marketplace commission, reservations |
 
 ---
 
-## Sprint backlog (not built yet)
+## Sprint backlog (next up)
 
-Priority gaps if you're continuing development:
-
-1. **API authentication** on order endpoints
-2. **Inbound webhook routes** + Stripe signature verification
-3. **Unify `ApplyDiscountCode`** (date validation in cart path)
-4. **Expose `RemoveDiscountCode`** on CartManager + API
-5. **Subscription billing** (actual charge, not just period dates)
-6. **Marketplace vendor API** and payout flow
-7. **Store / company CRUD** APIs
-8. **Shipping & tax driver resolvers** (honor `drivers.shipping.default`)
-9. **Expand Pest suite** — at minimum one test per API endpoint and payment driver
-10. **Outbox pattern** — wire `OutboxMessage` or remove migration
+1. **Customer cart API** — `POST /customers/{id}/cart` for login merge flows
+2. **Inventory admin API** — receive stock, warehouses
+3. **Catalog write API** — create/update products and variants
+4. **Marketplace payouts** — vendor settlement records
+5. **Native PayPal webhook verification**
+6. **Per-route API scopes** — replace single shared token
 
 See [`AGENTS.md`](AGENTS.md) for agent-specific rules when implementing these.
 

@@ -3,6 +3,7 @@
 namespace EzEcommerce\Api\Http\Controllers\V1;
 
 use EzEcommerce\Api\Http\Resources\OrderResource;
+use EzEcommerce\Api\Http\Resources\PaymentResource;
 use EzEcommerce\Api\Http\Resources\RefundResource;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
@@ -10,6 +11,7 @@ use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Orders\Models\OrderItem;
 use EzEcommerce\Orders\OrderManager;
 use EzEcommerce\Payments\Actions\CapturePayment;
+use EzEcommerce\Payments\Actions\RetryPaymentSession;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Refunds\Actions\RefundPayment;
@@ -23,6 +25,7 @@ final class OrderController extends Controller
         private readonly OrderManager $orderManager,
         private readonly CapturePayment $capturePayment,
         private readonly RefundPayment $refundPayment,
+        private readonly RetryPaymentSession $retryPaymentSession,
     ) {}
 
     public function show(Order $order): OrderResource
@@ -97,5 +100,33 @@ final class OrderController extends Controller
         );
 
         return new RefundResource($refund);
+    }
+
+    public function retryPayment(Order $order): JsonResponse
+    {
+        /** @var Payment $payment */
+        $payment = $order->payments()->latest()->firstOrFail();
+
+        $attempt = PaymentAttempt::query()
+            ->where('payment_id', $payment->id)
+            ->latest()
+            ->firstOrFail();
+
+        $result = $this->retryPaymentSession->execute($payment, $attempt, $order);
+
+        $payment->refresh();
+
+        return response()->json([
+            'payment' => new PaymentResource($payment),
+            'session' => [
+                'status' => $result->status->value,
+                'external_id' => $result->externalId,
+                'redirect_url' => $result->redirectUrl,
+                'client_secret' => $result->clientSecret,
+                'retryable' => $result->failure?->retryable,
+                'error_code' => $result->failure?->code,
+                'error_message' => $result->failure?->message,
+            ],
+        ]);
     }
 }

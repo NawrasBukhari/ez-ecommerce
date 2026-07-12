@@ -150,4 +150,35 @@ final class CartController extends Controller
 
         return new CartResource($cart);
     }
+
+    public function merge(Request $request): CartResource
+    {
+        $validated = $request->validate([
+            'guest_cart_id' => ['required', 'string'],
+            'customer_cart_id' => ['required', 'string'],
+            'guest_token' => ['required', 'string'],
+        ]);
+
+        $guestCart = Cart::query()
+            ->where('public_id', $validated['guest_cart_id'])
+            ->firstOrFail();
+
+        if ($guestCart->guest_token_hash === null
+            || ! hash_equals($guestCart->guest_token_hash, hash('sha256', $validated['guest_token']))) {
+            abort(403, 'Invalid guest cart token.');
+        }
+
+        $customerCart = Cart::query()
+            ->where('public_id', $validated['customer_cart_id'])
+            ->firstOrFail();
+
+        if ($customerCart->customer_id === null) {
+            abort(422, 'Target cart must belong to a customer.');
+        }
+
+        $cart = $this->commerce->cart()->merge($guestCart, $customerCart);
+        $cart->load('items.purchasable');
+
+        return new CartResource($cart);
+    }
 }

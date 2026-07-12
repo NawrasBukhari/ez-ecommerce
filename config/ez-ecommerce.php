@@ -82,12 +82,12 @@ return [
         'prefix' => 'api/ez-commerce/v1',
         'middleware' => ['api'],
         'token' => env('COMMERCE_API_TOKEN'),
-        'allow_unauthenticated' => env('COMMERCE_API_ALLOW_UNAUTHENTICATED', false),
+        'allow_unauthenticated' => filter_var(env('COMMERCE_API_ALLOW_UNAUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
     ],
 
     'inbound_webhooks' => [
         'shared_secret' => env('COMMERCE_INBOUND_WEBHOOK_SECRET'),
-        'allow_unsigned' => env('COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED', false),
+        'allow_unsigned' => filter_var(env('COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED', false), FILTER_VALIDATE_BOOLEAN),
     ],
 
     'outbound_webhooks' => [

@@ -9,15 +9,42 @@
 
 **ez-ecommerce** is a headless Laravel commerce **engine** (not a storefront). It owns:
 
-- `commerce_*` database tables and migrations
-- Cart → checkout → order → payment → fulfillment → refund flows
+- `commerce_*` database tables and migrations (44 files)
+- Cart → checkout → order → payment → fulfillment → refund → return flows
 - Inventory reservations with signed movements
-- Optional REST API, subscriptions scaffolding, marketplace commissions, B2B net terms, outbound webhooks
+- Versioned REST API at `api/ez-commerce/v1`
+- Subscriptions with period billing, marketplace commissions, B2B net terms, inbound/outbound webhooks
 
 Namespace: `EzEcommerce\`  
 Facade: `EzEcommerce` → `CommerceManager`  
 Config: `config/ez-ecommerce.php`  
 Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migrate`)
+
+---
+
+## Sprint status (current)
+
+### Shipped this sprint
+
+| Area | What landed |
+|------|-------------|
+| **Security** | Fail-closed API token, checkout cart token, inbound webhook auth, capture allowlist |
+| **API** | Customers, addresses, returns, cart merge, retry payment, stores/companies/vendors/subscriptions |
+| **Cart** | `removeDiscount()` on manager + `DELETE /cart/{id}/discount` |
+| **Subscriptions** | `BillSubscriptionPeriod` on `commerce:renew-subscriptions` |
+| **Webhooks** | Inbound routes, outbound outbox + delivery jobs |
+| **Payments** | Telr refund HTTP call; `POST /orders/{id}/retry-payment` |
+| **Tests** | 42 Pest tests across 8 feature files |
+
+### Still not built (do not assume)
+
+- Storefront / admin UI
+- Customer cart creation API (merge expects an existing customer cart)
+- Inventory admin REST API
+- Marketplace vendor payouts
+- Native PayPal webhook crypto verification (shared-secret gate exists)
+- `currency.rounding` config (unused)
+- Per-endpoint RBAC (single `COMMERCE_API_TOKEN` = full admin API)
 
 ---
 
@@ -39,31 +66,31 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 ```
 src/
-  Api/              REST controllers, resources, GuestCartToken middleware
-  B2B/              Company model (net terms metadata only)
-  Cart/             CartManager + cart actions
+  Api/              REST controllers, resources, middleware (guest cart, API token, checkout access)
+  B2B/              Company model + net terms
+  Cart/             CartManager + cart actions (single ApplyDiscountCode in Cart/Actions)
   Catalog/          Product, ProductVariant, Category, contracts
   Checkout/         CheckoutManager, CheckoutBuilder, PlaceOrder
   Commands/         commerce:install, release reservations, renew subscriptions
-  Core/             Money, Clock, Idempotency, enums, events, CommerceModel
+  Core/             Money, Clock, Idempotency, enums, events, OutboxMessage
   Customers/        Customer, Address, CustomerResolver
-  Discounts/        Discount model + standalone actions (partially duplicated in Cart/)
+  Discounts/        Discount model only (cart actions live in Cart/)
   Fulfillment/      CreateFulfillment
   Inventory/        Reservations, movements, warehouses
-  Marketplace/      Vendor, RecordVendorCommissions (on order create)
+  Marketplace/      Vendor, RecordVendorCommissions
   Orders/           OrderManager (fulfill), OrdersManager (lookup/recalc)
-  Payments/         Gateways + capture/refund/session actions
+  Payments/         Gateways + capture/refund/session/reconcile/retry actions
   Pricing/          DefaultPriceResolver, Price, PriceList
   Refunds/          RefundPayment
-  Returns/          Return request/receive/restock/damaged
-  Shipping/         FlatShippingCalculator only
+  Returns/          Return request/receive/restock/mark-damaged
+  Shipping/         FlatShippingCalculator + driver resolver
   Stores/           Store model + StoreContext
-  Subscriptions/    Plans, create/renew (no billing charge)
-  Taxes/            SimpleTaxCalculator only
-  Webhooks/         Outbound dispatch + inbound models (no routes)
+  Subscriptions/    Plans, create/renew/bill
+  Taxes/            SimpleTaxCalculator + driver resolver
+  Webhooks/         Inbound controller + outbound dispatch/delivery
 routes/api.php      Versioned REST API
-database/migrations commerce_* tables (44 migrations)
-tests/Feature/      17 Pest tests — core path only, not full coverage
+database/migrations commerce_* tables
+tests/Feature/      42 Pest tests — see README test matrix
 ```
 
 ---
@@ -81,13 +108,32 @@ tests/Feature/      17 Pest tests — core path only, not full coverage
 | `orders()` | `OrdersManager` | Find order, recalc payment/fulfillment status |
 | `morphMap([...])` | void | Register custom morph aliases |
 
+### CartManager methods
+
+`createGuest`, `addItem`, `updateItem`, `removeItem`, `applyDiscount`, `removeDiscount`, `calculateTotals`, `totalsHash`, `merge`
+
 ### Not on the facade (inject actions or managers directly)
 
 - `OrderManager` — `fulfill()` (used by API `OrderController`)
-- `RefundPayment`, `CreateFulfillment`, `CapturePayment`
+- `RefundPayment`, `CreateFulfillment`, `CapturePayment`, `RetryPaymentSession`, `ReconcilePayment`
 - Returns: `CreateReturnRequest`, `ReceiveReturn`, `RestockReturnedItem`, `MarkReturnedItemAsDamaged`
-- Subscriptions: `CreateSubscription`, `RenewSubscription`
-- Payments: `ReconcilePayment`, `RetryPaymentSession` (unwired)
+- Subscriptions: `CreateSubscription`, `RenewSubscription`, `BillSubscriptionPeriod`
+
+---
+
+## REST API auth (memorize this)
+
+| Routes | Auth |
+|--------|------|
+| Products, `POST /cart/guest` | Public |
+| Cart CRUD, discount, calculate | `X-Guest-Cart-Token` |
+| `POST /checkout` | `X-Guest-Cart-Token` + `Idempotency-Key` |
+| Orders, returns, customers, admin CRUD, `POST /cart/merge` | `Authorization: Bearer {COMMERCE_API_TOKEN}` or `X-Commerce-Api-Token` |
+| Inbound webhooks | Stripe signature or `X-Commerce-Webhook-Secret` |
+
+Empty `COMMERCE_API_TOKEN` → protected routes return **503** (fail closed).
+
+Boolean env vars (`COMMERCE_API_ALLOW_UNAUTHENTICATED`, `COMMERCE_INBOUND_WEBHOOK_ALLOW_UNSIGNED`) are parsed with `filter_var(..., FILTER_VALIDATE_BOOLEAN)` in config.
 
 ---
 
@@ -97,11 +143,11 @@ tests/Feature/      17 Pest tests — core path only, not full coverage
 |-----|---------------|-------------------|
 | `manual` | ManualPaymentGateway | Yes (admin capture) |
 | `null` | NullPaymentGateway | Zero-total orders only |
-| `fake` | FakePaymentGateway | Tests only |
-| `net_terms` | ManualPaymentGateway (alias) | B2B metadata only; no auto-invoice |
-| `stripe` | StripePaymentGateway | Partial — optional SDK, weak webhook verify |
-| `paypal` | PayPalPaymentGateway | Partial — HTTP, no webhook verify |
-| `telr` | TelrPaymentGateway | Partial — capture/refund incomplete |
+| `fake` | FakePaymentGateway | Tests / local webhooks only |
+| `net_terms` | ManualPaymentGateway (alias) | B2B metadata only |
+| `stripe` | StripePaymentGateway | Partial — SDK + webhook verify when secret set |
+| `paypal` | PayPalPaymentGateway | Partial — HTTP + shared-secret inbound webhooks |
+| `telr` | TelrPaymentGateway | Partial — sessions + refund HTTP; capture is optimistic |
 
 ---
 
@@ -109,28 +155,28 @@ tests/Feature/      17 Pest tests — core path only, not full coverage
 
 All default `true`. Disabling only stops gated code paths; tables still migrate.
 
-| Flag | What actually works | What does NOT work yet |
-|------|---------------------|------------------------|
-| `api` | 15 REST endpoints | No auth on order endpoints; no customer CRUD |
-| `subscriptions` | Create plan/subscription; renew dates | No charging, dunning, or API |
-| `marketplace` | Commission rows on order | No vendor API, payouts |
-| `multi_store` | `store_id` + `X-Commerce-Store` header | No store admin API |
-| `b2b` | `net_terms` + company payment_terms on order | No company API, credit limits |
-| `outbound_webhooks` | Signed HTTP POST on order events | Config URLs only; DB endpoints unused |
+| Flag | What works | Gaps |
+|------|------------|------|
+| `api` | Full REST surface + bearer auth | No inventory admin API |
+| `subscriptions` | CRUD API, renew + `BillSubscriptionPeriod` | No PSP dunning |
+| `marketplace` | Commissions + vendor API | No payouts |
+| `multi_store` | `store_id`, header, stores API | No per-store policies |
+| `b2b` | `net_terms`, companies API | No credit limits |
+| `outbound_webhooks` | Outbox + signed delivery jobs | Host must run queue worker |
 
 ---
 
 ## Safe extension points
 
-| Contract | Bind in | Purpose |
-|----------|---------|---------|
-| `PaymentGateway` | Host service provider | Custom PSP (implement all capability methods) |
-| `PriceResolver` | `PricingServiceProvider` | Custom pricing rules |
-| `TaxCalculator` | `TaxesServiceProvider` | Region-aware tax |
-| `ShippingCalculator` | `ShippingServiceProvider` | Carrier rates |
-| `CustomerResolver` | `CustomersServiceProvider` | Map auth user → Customer |
-| `ReservationPolicy` | `InventoryServiceProvider` | TTL / commit rules |
-| `StoreContext` | `StoresServiceProvider` | Multi-tenant store resolution |
+| Contract | Default | Register in |
+|----------|---------|-------------|
+| `PaymentGateway` | Per `drivers.payment.default` | Host service provider |
+| `PriceResolver` | `DefaultPriceResolver` | `PricingServiceProvider` |
+| `TaxCalculator` | `SimpleTaxCalculator` | `TaxesServiceProvider` (`drivers.tax.default`) |
+| `ShippingCalculator` | `FlatShippingCalculator` | `ShippingServiceProvider` (`drivers.shipping.default`) |
+| `CustomerResolver` | `DefaultCustomerResolver` | `CustomersServiceProvider` |
+| `ReservationPolicy` | `ConfigReservationPolicy` | `InventoryServiceProvider` |
+| `StoreContext` | `DefaultStoreContext` | `StoresServiceProvider` |
 
 **Not swappable via config:** Order, Payment, Cart, Inventory models.
 
@@ -141,9 +187,9 @@ All default `true`. Disabling only stops gated code paths; tables still migrate.
 1. **Adding `price()` to `Purchasable`** — rejected by design.
 2. **Calling Stripe inside `DB::transaction`** — causes deadlocks and double charges.
 3. **Using FQCN in `purchasable_type`** — breaks morph map; use aliases.
-4. **Expecting `features.*` to add routes** — most flags only gate listeners/metadata.
-5. **Using `Discounts\Actions\ApplyDiscountCode` in production cart flow** — `CartManager` uses `Cart\Actions\ApplyDiscountCode` (no date validation). Align them if you fix this.
-6. **Assuming 17 tests = full coverage** — they cover the happy path only. See README test matrix.
+4. **Expecting `features.*` to add routes** — `api` flag gates the API provider; others gate listeners/metadata.
+5. **Using `country` column on addresses** — DB column is `country_code`; API accepts `country` in JSON.
+6. **Assuming tests = full PSP coverage** — Stripe/PayPal/Telr live paths are not integration-tested.
 7. **Creating `commerce:migrate`** — migrations auto-load; host runs `migrate`.
 
 ---
@@ -158,7 +204,7 @@ vendor\bin\pint --dirty
 vendor\bin\phpstan analyse
 ```
 
-Test harness: Orchestra Testbench, SQLite in-memory, `tests\TestCase.php` + `SetsUpCatalog` trait.
+Test harness: Orchestra Testbench, SQLite in-memory, `tests\TestCase.php` sets `COMMERCE_API_TOKEN=test-api-token`.
 
 ---
 
@@ -177,7 +223,7 @@ Test harness: Orchestra Testbench, SQLite in-memory, `tests\TestCase.php` + `Set
 
 - Building a storefront / Blade / Livewire UI
 - Splitting into multiple Composer packages
-- Full Stripe/PayPal webhook verification infrastructure
+- Full Stripe/PayPal native webhook signature verification
 - Subscription billing engine (Stripe Billing, etc.)
 - Vendor payout automation
 - Admin dashboard

@@ -1,10 +1,13 @@
 <?php
 
+use EzEcommerce\Api\Http\Controllers\V1\AddressController;
 use EzEcommerce\Api\Http\Controllers\V1\CartController;
 use EzEcommerce\Api\Http\Controllers\V1\CheckoutController;
 use EzEcommerce\Api\Http\Controllers\V1\CompanyController;
+use EzEcommerce\Api\Http\Controllers\V1\CustomerController;
 use EzEcommerce\Api\Http\Controllers\V1\OrderController;
 use EzEcommerce\Api\Http\Controllers\V1\ProductController;
+use EzEcommerce\Api\Http\Controllers\V1\ReturnController;
 use EzEcommerce\Api\Http\Controllers\V1\StoreController;
 use EzEcommerce\Api\Http\Controllers\V1\SubscriptionController;
 use EzEcommerce\Api\Http\Controllers\V1\VendorController;
@@ -36,10 +39,27 @@ Route::prefix(config('ez-ecommerce.api.prefix', 'api/ez-commerce/v1'))
             ->middleware(ValidateCheckoutCartAccess::class);
 
         Route::middleware(CommerceApiToken::class)->group(function (): void {
+            Route::post('cart/merge', [CartController::class, 'merge']);
+
             Route::get('orders/{order}', [OrderController::class, 'show']);
             Route::post('orders/{order}/capture', [OrderController::class, 'capture']);
             Route::post('orders/{order}/fulfill', [OrderController::class, 'fulfill']);
             Route::post('orders/{order}/refund', [OrderController::class, 'refund']);
+            Route::post('orders/{order}/retry-payment', [OrderController::class, 'retryPayment']);
+            Route::post('orders/{order}/returns', [ReturnController::class, 'store']);
+
+            Route::get('returns', [ReturnController::class, 'index']);
+            Route::get('returns/{return}', [ReturnController::class, 'show']);
+            Route::post('returns/{return}/receive', [ReturnController::class, 'receive']);
+            Route::post('returns/{return}/items/{returnItem}/restock', [ReturnController::class, 'restockItem']);
+            Route::post('returns/{return}/items/{returnItem}/mark-damaged', [ReturnController::class, 'markItemDamaged']);
+
+            Route::get('customers', [CustomerController::class, 'index']);
+            Route::post('customers', [CustomerController::class, 'store']);
+            Route::get('customers/{customer}', [CustomerController::class, 'show']);
+            Route::get('customers/{customer}/addresses', [AddressController::class, 'index']);
+            Route::post('customers/{customer}/addresses', [AddressController::class, 'store']);
+            Route::get('customers/{customer}/addresses/{address}', [AddressController::class, 'show']);
 
             Route::get('stores', [StoreController::class, 'index']);
             Route::post('stores', [StoreController::class, 'store']);

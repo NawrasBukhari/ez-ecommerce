@@ -9,8 +9,12 @@ use EzEcommerce\B2B\Models\Company;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Cart\Models\CartItem;
 use EzEcommerce\Catalog\Models\Product;
+use EzEcommerce\Customers\Models\Address;
+use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Marketplace\Models\Vendor;
 use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Returns\Models\ReturnItem;
+use EzEcommerce\Returns\Models\ReturnRequest;
 use EzEcommerce\Stores\Models\Store;
 use EzEcommerce\Subscriptions\Models\Subscription;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -75,6 +79,34 @@ class ApiServiceProvider extends ServiceProvider
 
         Route::bind('subscription', function (string $value): Subscription {
             return Subscription::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('customer', function (string $value): Customer {
+            return Customer::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('address', function (string $value, $route): Address {
+            /** @var Customer $customer */
+            $customer = $route->parameter('customer');
+
+            return Address::query()
+                ->where('customer_id', $customer->id)
+                ->where('public_id', $value)
+                ->firstOrFail();
+        });
+
+        Route::bind('return', function (string $value): ReturnRequest {
+            return ReturnRequest::query()->where('public_id', $value)->firstOrFail();
+        });
+
+        Route::bind('returnItem', function (string $value, $route): ReturnItem {
+            /** @var ReturnRequest $return */
+            $return = $route->parameter('return');
+
+            return ReturnItem::query()
+                ->where('return_id', $return->id)
+                ->where('id', $value)
+                ->firstOrFail();
         });
 
         Route::bind('item', function (string $value, $route): CartItem {

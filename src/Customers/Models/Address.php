@@ -20,7 +20,7 @@ class Address extends CommerceModel
         'city',
         'state',
         'postal_code',
-        'country',
+        'country_code',
         'metadata',
     ];
 
