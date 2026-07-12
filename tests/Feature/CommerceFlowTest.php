@@ -16,8 +16,9 @@ it('boots the package and resolves the commerce manager', function () {
     expect(EzEcommerce::cart())->not->toBeNull();
 });
 
-it('does not register api provider when feature is disabled', function () {
-    expect(config('ez-ecommerce.features.api'))->toBeFalse();
+it('enables day-1 features by default', function () {
+    expect(config('ez-ecommerce.features.api'))->toBeTrue();
+    expect(config('ez-ecommerce.features.outbound_webhooks'))->toBeTrue();
 });
 
 it('completes the core transactional path', function () {

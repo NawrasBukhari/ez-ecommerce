@@ -14,6 +14,9 @@ use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Drivers\ManualPaymentGateway;
 use EzEcommerce\Payments\Drivers\NullPaymentGateway;
+use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
+use EzEcommerce\Payments\Drivers\StripePaymentGateway;
+use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
@@ -121,6 +124,9 @@ final class ReconcilePayment
             'null' => app(NullPaymentGateway::class),
             'manual' => app(ManualPaymentGateway::class),
             'fake' => app(FakePaymentGateway::class),
+            'stripe' => app(StripePaymentGateway::class),
+            'paypal' => app(PayPalPaymentGateway::class),
+            'telr' => app(TelrPaymentGateway::class),
             default => throw new InvalidArgumentException("Unknown payment gateway [{$name}]."),
         };
     }

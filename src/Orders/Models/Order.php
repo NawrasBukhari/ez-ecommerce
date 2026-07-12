@@ -22,6 +22,7 @@ class Order extends CommerceModel
     protected $table = 'commerce_orders';
 
     protected $fillable = [
+        'store_id',
         'customer_id',
         'cart_id',
         'status',

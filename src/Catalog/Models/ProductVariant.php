@@ -7,9 +7,11 @@ use EzEcommerce\Catalog\Contracts\Shippable;
 use EzEcommerce\Catalog\Contracts\Stockable;
 use EzEcommerce\Catalog\Contracts\Taxable;
 use EzEcommerce\Core\Models\CommerceModel;
+use EzEcommerce\Database\Factories\ProductVariantFactory;
 use EzEcommerce\Inventory\Models\InventoryBalance;
 use EzEcommerce\Pricing\Models\Price;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -18,6 +20,7 @@ class ProductVariant extends CommerceModel implements Purchasable, Shippable, St
 {
     protected static bool $usesPublicId = true;
 
+    use HasFactory;
     use SoftDeletes;
 
     public const MORPH_ALIAS = 'commerce_product_variant';
@@ -96,5 +99,10 @@ class ProductVariant extends CommerceModel implements Purchasable, Shippable, St
         $category = $this->metadata?->get('tax_category');
 
         return is_string($category) ? $category : null;
+    }
+
+    protected static function newFactory(): ProductVariantFactory
+    {
+        return ProductVariantFactory::new();
     }
 }

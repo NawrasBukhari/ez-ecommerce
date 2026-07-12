@@ -26,6 +26,7 @@ abstract class TestCase extends Orchestra
         config()->set('ez-ecommerce.currency.default', 'AED');
         config()->set('ez-ecommerce.tax.rate', 0.05);
         config()->set('ez-ecommerce.shipping.flat_rate_minor', 1000);
+        config()->set('ez-ecommerce.features.api', true);
     }
 
     protected function defineDatabaseMigrations(): void

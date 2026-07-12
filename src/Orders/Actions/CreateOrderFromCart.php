@@ -11,17 +11,22 @@ use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\TransitionDimension;
 use EzEcommerce\Customers\Models\Address;
 use EzEcommerce\Customers\Models\Customer;
+use EzEcommerce\Marketplace\Actions\RecordVendorCommissions;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Orders\Models\OrderAdjustment;
 use EzEcommerce\Orders\Models\OrderItem;
 use EzEcommerce\Pricing\Contracts\PriceResolver;
 use EzEcommerce\Pricing\Data\PricingContext;
+use EzEcommerce\Stores\Contracts\StoreContext;
 
 final class CreateOrderFromCart
 {
     public function __construct(
         private readonly PriceResolver $priceResolver,
         private readonly RecordOrderTransition $recordOrderTransition,
+        private readonly AllocateLineDiscounts $allocateLineDiscounts,
+        private readonly RecordVendorCommissions $recordVendorCommissions,
+        private readonly StoreContext $storeContext,
     ) {}
 
     public function execute(
@@ -34,7 +39,24 @@ final class CreateOrderFromCart
     ): Order {
         $cart->load('items.purchasable', 'adjustments');
 
+        $metadata = [
+            'shipping_address_id' => $shippingAddress?->id,
+            'billing_address_id' => $billingAddress?->id,
+        ];
+
+        if ($paymentMethod === 'net_terms' && config('ez-ecommerce.features.b2b', false)) {
+            $customer->loadMissing('company');
+            $termsDays = $customer->company?->payment_terms_days;
+            if ($termsDays !== null && $termsDays > 0) {
+                $metadata['payment_terms_days'] = $termsDays;
+                $metadata['payment_terms_due_at'] = (new DateTimeImmutable)
+                    ->modify("+{$termsDays} days")
+                    ->format(DateTimeImmutable::ATOM);
+            }
+        }
+
         $order = Order::query()->create([
+            'store_id' => $cart->store_id ?? $this->storeContext->id(),
             'customer_id' => $customer->id,
             'cart_id' => $cart->id,
             'status' => OrderStatus::PendingPayment,
@@ -49,10 +71,7 @@ final class CreateOrderFromCart
             'grand_total_minor' => $cart->grand_total_minor,
             'shipping_method' => $shippingMethod,
             'payment_method' => $paymentMethod,
-            'metadata' => [
-                'shipping_address_id' => $shippingAddress?->id,
-                'billing_address_id' => $billingAddress?->id,
-            ],
+            'metadata' => $metadata,
         ]);
 
         foreach ($cart->items as $cartItem) {
@@ -113,6 +132,9 @@ final class CreateOrderFromCart
             OrderStatus::PendingPayment->value,
             'Order created from cart',
         );
+
+        $order = $this->allocateLineDiscounts->execute($order);
+        $order = $this->recordVendorCommissions->execute($order);
 
         return $order->fresh(['items', 'adjustments']);
     }

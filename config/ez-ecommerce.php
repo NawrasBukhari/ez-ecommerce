@@ -15,7 +15,24 @@ return [
 
     'drivers' => [
         'payment' => [
-            'default' => 'manual',
+            'default' => env('COMMERCE_PAYMENT_DRIVER', 'manual'),
+            'stripe' => [
+                'secret' => env('STRIPE_SECRET'),
+                'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+            ],
+            'paypal' => [
+                'client_id' => env('PAYPAL_CLIENT_ID'),
+                'client_secret' => env('PAYPAL_CLIENT_SECRET'),
+                'mode' => env('PAYPAL_MODE', 'sandbox'),
+            ],
+            'telr' => [
+                'store_id' => env('TELR_STORE_ID'),
+                'auth_key' => env('TELR_AUTH_KEY'),
+                'test_mode' => env('TELR_TEST_MODE', true),
+                'endpoint' => env('TELR_ENDPOINT', 'https://secure.telr.com/gateway/order.json'),
+                'return_url' => env('TELR_RETURN_URL'),
+                'checkout_url' => env('TELR_CHECKOUT_URL', 'https://secure.telr.com/gateway/process.html'),
+            ],
         ],
         'shipping' => [
             'default' => 'flat',
@@ -38,23 +55,39 @@ return [
         'reservation_ttl' => [
             'default' => 30,
             'manual' => 1440,
+            'net_terms' => 10080,
             'card' => 30,
             'null' => 0,
         ],
     ],
 
+    'cart' => [
+        'guest_ttl_days' => 30,
+    ],
+
+    'multi_store' => [
+        'default_store_id' => env('COMMERCE_DEFAULT_STORE_ID'),
+    ],
+
     'features' => [
-        'api' => false,
-        'subscriptions' => false,
-        'marketplace' => false,
-        'multi_store' => false,
-        'b2b' => false,
-        'outbound_webhooks' => false,
+        'api' => true,
+        'subscriptions' => true,
+        'marketplace' => true,
+        'multi_store' => true,
+        'b2b' => true,
+        'outbound_webhooks' => true,
     ],
 
     'api' => [
         'prefix' => 'api/ez-commerce/v1',
         'middleware' => ['api'],
+    ],
+
+    'outbound_webhooks' => [
+        'secret' => env('COMMERCE_WEBHOOK_SECRET'),
+        'endpoints' => [
+            // ['url' => 'https://example.com/webhooks/commerce', 'events' => ['order.placed', 'order.paid']],
+        ],
     ],
 
     'idempotency' => [

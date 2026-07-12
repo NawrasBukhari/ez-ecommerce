@@ -85,7 +85,7 @@ final class CalculateCartTotals
                 ->where('origin', '!=', AdjustmentOrigin::System)
                 ->where('type', AdjustmentType::Discount)
                 ->sum('amount_minor');
-            $discountTotal = Money::fromMinor($manualDiscountMinor, $cart->currency);
+            $discountTotal = Money::fromMinor(abs($manualDiscountMinor), $cart->currency);
 
             $shippingQuote = $this->shippingCalculator->quote(new ShippingRequest(
                 currency: $cart->currency,

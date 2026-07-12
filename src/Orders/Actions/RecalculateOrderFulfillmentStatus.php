@@ -18,9 +18,7 @@ final class RecalculateOrderFulfillmentStatus
         $from = $order->fulfillment_status->value;
 
         $totalOrdered = $order->items->sum('quantity');
-        $totalFulfilled = $order->fulfillments
-            ->where('status', '!=', FulfillmentStatus::Cancelled)
-            ->sum('quantity');
+        $totalFulfilled = $order->fulfillments->sum('quantity');
 
         $status = match (true) {
             $totalFulfilled === 0 => FulfillmentStatus::Unfulfilled,

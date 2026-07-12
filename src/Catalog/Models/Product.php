@@ -3,7 +3,9 @@
 namespace EzEcommerce\Catalog\Models;
 
 use EzEcommerce\Core\Models\CommerceModel;
+use EzEcommerce\Database\Factories\ProductFactory;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -12,6 +14,7 @@ class Product extends CommerceModel
 {
     protected static bool $usesPublicId = true;
 
+    use HasFactory;
     use SoftDeletes;
 
     public const MORPH_ALIAS = 'commerce_product';
@@ -41,5 +44,10 @@ class Product extends CommerceModel
     public function categories(): BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'commerce_category_product');
+    }
+
+    protected static function newFactory(): ProductFactory
+    {
+        return ProductFactory::new();
     }
 }

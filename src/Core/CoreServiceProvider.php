@@ -8,6 +8,8 @@ use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Support\MorphMap;
 use EzEcommerce\Core\Support\SystemClock;
+use EzEcommerce\Returns\Models\ReturnItem;
+use EzEcommerce\Returns\Models\ReturnRequest;
 use Illuminate\Support\ServiceProvider;
 
 class CoreServiceProvider extends ServiceProvider
@@ -20,6 +22,8 @@ class CoreServiceProvider extends ServiceProvider
         MorphMap::register([
             Product::MORPH_ALIAS => Product::class,
             ProductVariant::MORPH_ALIAS => ProductVariant::class,
+            ReturnRequest::MORPH_ALIAS => ReturnRequest::class,
+            'commerce_return_item' => ReturnItem::class,
         ]);
     }
 }

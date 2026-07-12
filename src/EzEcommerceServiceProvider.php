@@ -12,6 +12,7 @@ use EzEcommerce\Checkout\CheckoutManager;
 use EzEcommerce\Checkout\CheckoutServiceProvider;
 use EzEcommerce\Commands\CommerceInstallCommand;
 use EzEcommerce\Commands\ReleaseExpiredReservationsCommand;
+use EzEcommerce\Commands\RenewSubscriptionsCommand;
 use EzEcommerce\Core\CoreServiceProvider;
 use EzEcommerce\Customers\CustomersServiceProvider;
 use EzEcommerce\Discounts\DiscountsServiceProvider;
@@ -19,6 +20,7 @@ use EzEcommerce\Fulfillment\FulfillmentServiceProvider;
 use EzEcommerce\Inventory\InventoryManager;
 use EzEcommerce\Inventory\InventoryServiceProvider;
 use EzEcommerce\Marketplace\MarketplaceServiceProvider;
+use EzEcommerce\Orders\OrderManager;
 use EzEcommerce\Orders\OrdersManager;
 use EzEcommerce\Orders\OrdersServiceProvider;
 use EzEcommerce\Payments\PaymentsServiceProvider;
@@ -89,7 +91,8 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
                 'create_commerce_outbox_messages_table',
             ])
             ->hasCommand(CommerceInstallCommand::class)
-            ->hasCommand(ReleaseExpiredReservationsCommand::class);
+            ->hasCommand(ReleaseExpiredReservationsCommand::class)
+            ->hasCommand(RenewSubscriptionsCommand::class);
     }
 
     public function packageRegistered(): void
@@ -102,6 +105,7 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
         $this->app->singleton(CatalogManager::class);
         $this->app->singleton(InventoryManager::class);
         $this->app->singleton(OrdersManager::class);
+        $this->app->singleton(OrderManager::class);
 
         foreach ($this->moduleProviders() as $provider) {
             $this->app->register($provider);
@@ -132,11 +136,11 @@ class EzEcommerceServiceProvider extends PackageServiceProvider
             PaymentsServiceProvider::class,
             FulfillmentServiceProvider::class,
             RefundsServiceProvider::class,
+            ReturnsServiceProvider::class,
             InboundWebhooksServiceProvider::class,
+            OutboundWebhooksServiceProvider::class,
             StoresServiceProvider::class,
             B2BServiceProvider::class,
-            ReturnsServiceProvider::class,
-            OutboundWebhooksServiceProvider::class,
             SubscriptionsServiceProvider::class,
             MarketplaceServiceProvider::class,
         ];

@@ -2,6 +2,7 @@
 
 namespace EzEcommerce\Customers\Models;
 
+use EzEcommerce\B2B\Models\Company;
 use EzEcommerce\Cart\Models\Cart;
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Orders\Models\Order;
@@ -24,6 +25,7 @@ class Customer extends CommerceModel
         'last_name',
         'phone',
         'customer_group_id',
+        'company_id',
         'metadata',
     ];
 
@@ -42,6 +44,11 @@ class Customer extends CommerceModel
     public function customerGroup(): BelongsTo
     {
         return $this->belongsTo(CustomerGroup::class);
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
     }
 
     public function addresses(): HasMany

@@ -20,6 +20,7 @@ class Cart extends CommerceModel
 
     protected $fillable = [
         'customer_id',
+        'store_id',
         'guest_token_hash',
         'status',
         'currency',
