@@ -1,5 +1,3 @@
-laravel: '@testbench'
-
 providers:
   - EzEcommerce\EzEcommerceServiceProvider
 
