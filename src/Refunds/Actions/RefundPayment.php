@@ -11,7 +11,9 @@ use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Payments\Actions\AssertNoConflictingPaymentOperation;
 use EzEcommerce\Payments\Actions\ResolveProviderPaymentReference;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
 use EzEcommerce\Payments\Models\Payment;
@@ -32,6 +34,8 @@ final class RefundPayment
         private readonly PaymentGatewayRegistry $gateways,
         private readonly ResolveProviderPaymentReference $providerReference,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
+        private readonly AssertNoConflictingPaymentOperation $assertNoConflictingPaymentOperation,
+        private readonly PaymentOperationPolicy $paymentOperationPolicy,
     ) {
     }
 
@@ -84,7 +88,14 @@ final class RefundPayment
 
         ['refund' => $refund, 'attempt' => $attempt] = DB::transaction(function () use ($payment, $amount, $reason, $idempotencyKey) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (! $this->paymentOperationPolicy->canRefund($locked)) {
+                throw new RuntimeException('Payment is not in a refundable state.');
+            }
+
             $payloadHash = $this->refundPayloadHash($locked, $amount, $reason);
+
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'refund');
 
             $pendingAttempt = PaymentAttempt::query()
                 ->where('payment_id', $locked->id)

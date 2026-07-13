@@ -25,6 +25,7 @@ final class ReconcilePayment
         private readonly Clock $clock,
         private readonly PaymentGatewayRegistry $gateways,
         private readonly ApplyPaymentCapture $applyPaymentCapture,
+        private readonly ApplyPaymentReversal $applyPaymentReversal,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
         private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
@@ -49,13 +50,14 @@ final class ReconcilePayment
         $isAuthorization = $this->isAuthorizationEvent($request->gateway, $event->eventType);
         $isFailure = $this->isFailureEvent($request->gateway, $event->eventType);
         $isPendingCapture = $this->isPendingCaptureEvent($request->gateway, $event->eventType);
+        $isReversal = $this->isReversalEvent($request->gateway, $event->eventType);
 
-        if (! $isCapture && ! $isAuthorization && ! $isFailure && ! $isPendingCapture) {
+        if (! $isCapture && ! $isAuthorization && ! $isFailure && ! $isPendingCapture && ! $isReversal) {
             return $event;
         }
 
         try {
-            DB::transaction(function () use ($request, $event, $isAuthorization, $isFailure, $isPendingCapture) {
+            DB::transaction(function () use ($request, $event, $isAuthorization, $isFailure, $isPendingCapture, $isReversal) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
                     ->where('external_event_id', $event->eventId)
@@ -82,6 +84,15 @@ final class ReconcilePayment
                 $payment = $this->findPayment($event);
                 if ($payment === null) {
                     $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
+                // Reversal has precedence over failure/pending: a provider clawback
+                // is a first-class ledger event, not a generic capture failure.
+                if ($isReversal) {
+                    $this->applyReversal($payment, $event);
+                    $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
 
                     return;
                 }
@@ -119,6 +130,18 @@ final class ReconcilePayment
                 }
 
                 $transactionReference = $event->transactionReference ?? $event->paymentReference;
+
+                // A delayed completion webhook arriving after a reversal must not
+                // restore the payment to Captured. Reversal is terminal-monotonic.
+                $currentStatus = Payment::query()
+                    ->where('id', $payment->id)
+                    ->lockForUpdate()
+                    ->value('status');
+                if ($currentStatus === PaymentStatus::Reversed->value) {
+                    $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
+
+                    return;
+                }
 
                 $payment = $this->applyPaymentCapture->execute(
                     $payment,
@@ -226,7 +249,6 @@ final class ReconcilePayment
             ], true),
             'paypal' => in_array($eventType, [
                 'PAYMENT.CAPTURE.DECLINED',
-                'PAYMENT.CAPTURE.REVERSED',
             ], true),
             'fake' => in_array($eventType, [
                 'payment_intent.payment_failed',
@@ -234,6 +256,33 @@ final class ReconcilePayment
             ], true),
             default => false,
         };
+    }
+
+    private function isReversalEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'paypal' => in_array($eventType, [
+                'PAYMENT.CAPTURE.REVERSED',
+            ], true),
+            'fake' => in_array($eventType, ['payment.reversed'], true),
+            default => false,
+        };
+    }
+
+    private function applyReversal(Payment $payment, GatewayWebhookEvent $event): void
+    {
+        $amountMinor = $event->amountMinor ?? $payment->captured_minor;
+        if ($amountMinor <= 0) {
+            $amountMinor = $payment->captured_minor;
+        }
+
+        $this->applyPaymentReversal->execute(
+            $payment,
+            $event->transactionReference ?? $event->paymentReference,
+            $amountMinor,
+            $event->currency ?? $payment->currency,
+            $event->metadata,
+        );
     }
 
     private function applyFailureTransition(Payment $payment, GatewayWebhookEvent $event): void
@@ -251,6 +300,7 @@ final class ReconcilePayment
             PaymentStatus::PartiallyRefunded,
             PaymentStatus::Cancelled,
             PaymentStatus::Failed,
+            PaymentStatus::Reversed,
         ];
 
         if (in_array($locked->status, $terminal, true)) {
@@ -283,6 +333,7 @@ final class ReconcilePayment
             PaymentStatus::PartiallyRefunded,
             PaymentStatus::Cancelled,
             PaymentStatus::Failed,
+            PaymentStatus::Reversed,
         ];
 
         if (in_array($locked->status, $terminal, true)) {

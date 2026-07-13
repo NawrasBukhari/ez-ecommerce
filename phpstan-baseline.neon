@@ -615,7 +615,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$status\.$#'
 			identifier: property.notFound
-			count: 6
+			count: 7
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
 
 		-

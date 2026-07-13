@@ -10,6 +10,7 @@ use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
 use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -63,45 +64,65 @@ final class FinalizeAcceptedPayment
         return $payment->fresh();
     }
 
-    /** @throws ReservationExpiredException|InventoryCommitException */
+    /**
+     * Atomically commit inventory, confirm the order, and insert the unique
+     * order.paid outbox row for a captured payment. The outbox event is never
+     * dispatched synchronously from here; after the transaction commits, the
+     * worker job is scheduled via DB::afterCommit. If enqueueing fails, the
+     * durable outbox polling command (commerce:process-outbox) remains the
+     * safety net, so the event is not lost.
+     *
+     * @throws ReservationExpiredException|InventoryCommitException
+     */
     public function completeOrderAfterCapture(Payment $payment): void
     {
         $payment->refresh();
         $order = $payment->order;
 
-        if ($payment->status === PaymentStatus::Captured) {
-            $this->commitReservation->executeForOrder($order);
-            $this->confirmOrderOnPaymentAccepted->execute($order);
-
-            // Exactly-once OrderPaid via a unique outbox row keyed on order.paid:{order_id}.
-            // Two concurrent finalizers race on the unique constraint; the loser skips dispatch.
-            // A crash after insert but before commit rolls the row back, so recovery re-dispatches.
-            // The insert runs in its own savepoint so a unique violation on PostgreSQL doesn't
-            // poison the surrounding transaction (PostgreSQL aborts the whole txn on any error).
-            // The outbox row is the source of truth: a separate worker drains it and dispatches
-            // the integration event, closing the crash window between durable state and delivery.
-            try {
-                $outboxMessage = DB::transaction(fn () => OutboxMessage::query()->create([
-                    'event' => 'order.paid',
-                    'key' => "order.paid:{$order->id}",
-                    'status' => 'pending',
-                    'payload' => [
-                        'order_id' => $order->id,
-                        'order_public_id' => $order->public_id,
-                        'payment_id' => $payment->id,
-                    ],
-                ]));
-
-                ProcessOutboxJob::dispatchSync($outboxMessage->id);
-            } catch (UniqueConstraintViolationException) {
-                // Already enqueued by a concurrent finalizer or a prior recovery.
-            }
-
+        if (! in_array($payment->status, [PaymentStatus::Captured, PaymentStatus::PartiallyCaptured], true)) {
             return;
         }
 
         if ($payment->status === PaymentStatus::PartiallyCaptured) {
+            // Partial capture confirms the order but does not commit inventory or
+            // enqueue order.paid — those wait for a full capture.
             $this->confirmOrderOnPaymentAccepted->execute($order);
+
+            return;
+        }
+
+        $outboxId = DB::transaction(function () use ($payment, $order) {
+            $lockedPayment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+
+            $this->commitReservation->executeForOrder($lockedOrder);
+            $this->confirmOrderOnPaymentAccepted->execute($lockedOrder);
+
+            // Insert the outbox row in its own savepoint so a unique-key violation
+            // (concurrent finalizer) does not poison the surrounding transaction on
+            // PostgreSQL. The order confirmation still commits; the concurrent
+            // finalizer owns the outbox row and its delivery.
+            try {
+                return DB::transaction(fn () => OutboxMessage::query()->create([
+                    'event' => 'order.paid',
+                    'key' => "order.paid:{$lockedOrder->id}",
+                    'status' => 'pending',
+                    'payload' => [
+                        'order_id' => $lockedOrder->id,
+                        'order_public_id' => $lockedOrder->public_id,
+                        'payment_id' => $lockedPayment->id,
+                    ],
+                ])->id);
+            } catch (UniqueConstraintViolationException) {
+                // Already enqueued by a concurrent finalizer or a prior recovery.
+                return null;
+            }
+        });
+
+        if ($outboxId !== null) {
+            // Schedule delivery after the transaction commits. Failure to enqueue
+            // is non-fatal: commerce:process-outbox drains pending rows.
+            DB::afterCommit(fn () => ProcessOutboxJob::dispatch($outboxId));
         }
     }
 }

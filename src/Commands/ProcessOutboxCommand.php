@@ -8,33 +8,60 @@ use Illuminate\Console\Command;
 
 class ProcessOutboxCommand extends Command
 {
-    protected $signature = 'commerce:process-outbox {--limit=100 : Maximum number of outbox rows to process} {--once : Process a single row and exit}';
+    protected $signature = 'commerce:process-outbox
+        {--limit=100 : Maximum number of outbox rows to enqueue}
+        {--event= : Only process rows for this event name}
+        {--once : Process a single row and exit}
+        {--sync : Process rows inline instead of dispatching queued jobs (admin use only)}
+        {--retry-terminal : Re-queue failed_terminal rows for another attempt}';
 
-    protected $description = 'Drain pending outbox messages by dispatching their integration events';
+    protected $description = 'Drain pending, retryable, and stale outbox messages by dispatching their integration events (at-least-once delivery).';
 
     public function handle(): int
     {
-        $limit = (int) $this->option('limit');
-        if ($this->option('once')) {
-            $limit = 1;
+        $limit = $this->option('once') ? 1 : (int) $this->option('limit');
+
+        $query = OutboxMessage::query()->claimable();
+
+        if ($this->option('retry-terminal')) {
+            $query->orWhere('status', 'failed_terminal');
         }
 
-        $messages = OutboxMessage::query()
-            ->pending()
-            ->limit($limit)
-            ->get();
+        if ($this->option('event')) {
+            $query->where('event', $this->option('event'));
+        }
+
+        // Reset failed_terminal rows selected for retry back to pending so the
+        // claim logic can pick them up.
+        if ($this->option('retry-terminal')) {
+            OutboxMessage::query()
+                ->where('status', 'failed_terminal')
+                ->when($this->option('event'), fn ($q) => $q->where('event', $this->option('event')))
+                ->limit($limit)
+                ->update(['status' => 'pending', 'available_at' => null, 'last_error' => null]);
+        }
+
+        $messages = (clone $query)->limit($limit)->get();
 
         if ($messages->isEmpty()) {
-            $this->info('No pending outbox messages.');
+            $this->info('No claimable outbox messages.');
 
             return self::SUCCESS;
         }
 
+        $sync = (bool) $this->option('sync');
+
         foreach ($messages as $message) {
-            ProcessOutboxJob::dispatchSync($message->id);
+            if ($sync) {
+                ProcessOutboxJob::dispatchSync($message->id);
+            } else {
+                ProcessOutboxJob::dispatch($message->id);
+            }
         }
 
-        $this->info("Processed {$messages->count()} outbox message(s).");
+        $this->info(
+            ($sync ? 'Processed' : 'Enqueued').' '.$messages->count().' outbox message(s).'
+        );
 
         return self::SUCCESS;
     }

@@ -10,4 +10,5 @@ enum PaymentTransactionType: string
     case Refund = 'refund';
     case Chargeback = 'chargeback';
     case Adjustment = 'adjustment';
+    case Reversal = 'reversal';
 }

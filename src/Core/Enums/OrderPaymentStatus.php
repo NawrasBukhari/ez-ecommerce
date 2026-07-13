@@ -12,4 +12,5 @@ enum OrderPaymentStatus: string
     case PartiallyRefunded = 'partially_refunded';
     case Refunded = 'refunded';
     case Failed = 'failed';
+    case Disputed = 'disputed';
 }

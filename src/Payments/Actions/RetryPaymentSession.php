@@ -11,6 +11,7 @@ use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -20,6 +21,7 @@ final class RetryPaymentSession
         private readonly PaymentGatewayRegistry $gateways,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
         private readonly PaymentOperationPolicy $paymentOperationPolicy,
+        private readonly AssertNoConflictingPaymentOperation $assertNoConflictingPaymentOperation,
     ) {
     }
 
@@ -106,7 +108,15 @@ final class RetryPaymentSession
 
     private function createSessionForAttempt(Payment $payment, Order $order, PaymentAttempt $attempt): PaymentSessionResult
     {
-        $attempt->update(['status' => 'pending']);
+        // Claim the create_session operation under the payment lock so a
+        // concurrent capture/void/refund cannot start alongside it. The pending
+        // status is committed atomically with the conflict check; the provider
+        // call runs outside the transaction.
+        DB::transaction(function () use ($payment, $attempt) {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'create_session');
+            $attempt->update(['status' => 'pending']);
+        });
 
         $gateway = $this->gateways->for($payment->gateway);
 

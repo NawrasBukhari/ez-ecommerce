@@ -5,7 +5,9 @@ namespace EzEcommerce\Payments\Actions;
 use EzEcommerce\Core\Contracts\Clock;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
+use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Money\Money;
+use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\VoidPaymentData;
@@ -14,6 +16,7 @@ use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
+use EzEcommerce\Payments\Support\PaymentAttemptRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -26,12 +29,16 @@ final class VoidPaymentAuthorization
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly Clock $clock,
         private readonly PaymentOperationPolicy $paymentOperationPolicy,
+        private readonly AssertNoConflictingPaymentOperation $assertNoConflictingPaymentOperation,
     ) {
     }
 
     public function execute(Payment $payment, string $idempotencyKey = ''): Payment
     {
         $payment->refresh();
+
+        $providerReference = $this->providerReference->forCapture($payment);
+        $payloadHash = $this->voidPayloadHash($payment, $providerReference);
 
         if ($idempotencyKey !== '') {
             $existing = PaymentAttempt::query()
@@ -41,38 +48,44 @@ final class VoidPaymentAuthorization
                 ->first();
 
             if ($existing !== null) {
-                if ($existing->status === 'succeeded') {
-                    return $payment->fresh();
+                $metadata = PaymentAttemptRequest::metadata($existing);
+                $storedHash = $metadata['payload_hash'] ?? null;
+
+                if ($storedHash !== null && $storedHash !== $payloadHash) {
+                    throw IdempotencyPayloadMismatchException::for('void', $idempotencyKey);
                 }
 
-                if (in_array($existing->status, ['pending', 'unknown'], true)) {
-                    throw new RuntimeException('Void with this idempotency key is in progress or requires reconciliation.');
-                }
-
-                // failed / failed_retryable → fall through and create a new attempt.
+                return match ($existing->status) {
+                    'succeeded' => $payment->fresh(),
+                    'pending' => throw new RuntimeException('Void with this idempotency key is already in progress.'),
+                    'unknown' => throw new RuntimeException('Void with this idempotency key requires reconciliation.'),
+                    // failed is terminal: cache and rethrow the original failure
+                    // without creating a second row (avoids the UNIQUE(payment_id,
+                    // idempotency_key) duplicate-key error on retries).
+                    'failed' => throw new RuntimeException(
+                        'Void with this idempotency key previously failed terminally: '
+                        .($existing->error_message ?? 'void_failed')
+                        .'. Use a new idempotency key to attempt a fresh void.',
+                    ),
+                    // failed_retryable reuses the existing attempt + provider key.
+                    'failed_retryable' => $this->reuseAttempt($payment, $existing, $providerReference),
+                    default => throw new RuntimeException('Void attempt in unexpected state: '.$existing->status),
+                };
             }
         }
 
-        $attempt = DB::transaction(function () use ($payment, $idempotencyKey) {
+        $attempt = DB::transaction(function () use ($payment, $idempotencyKey, $payloadHash) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
             if (! $this->paymentOperationPolicy->canVoid($locked)) {
                 throw new RuntimeException('Only authorized, pending, or requires-action payments can be voided.');
             }
 
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'void');
+
             $gateway = $this->gateways->for($locked->gateway);
             if (! $gateway->capabilities()->void) {
                 throw PaymentOperationNotSupported::for($locked->gateway, 'void');
-            }
-
-            $inFlightVoid = PaymentAttempt::query()
-                ->where('payment_id', $locked->id)
-                ->where('operation', 'void')
-                ->whereIn('status', ['pending', 'unknown'])
-                ->exists();
-
-            if ($inFlightVoid) {
-                throw new RuntimeException('A void is in progress or requires reconciliation for this payment.');
             }
 
             return PaymentAttempt::query()->create([
@@ -84,16 +97,43 @@ final class VoidPaymentAuthorization
                     'provider_operation' => 'void',
                     'requested_amount_minor' => $locked->amount_minor,
                     'currency' => $locked->currency,
+                    'payload_hash' => $payloadHash,
                 ],
             ]);
         });
 
+        return $this->executeVoid($payment, $attempt, $providerReference);
+    }
+
+    private function reuseAttempt(Payment $payment, PaymentAttempt $attempt, ?string $providerReference): Payment
+    {
+        DB::transaction(function () use ($payment, $attempt) {
+            $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (! $this->paymentOperationPolicy->canVoid($locked)) {
+                throw new RuntimeException('Only authorized, pending, or requires-action payments can be voided.');
+            }
+
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'void');
+
+            $attempt->update([
+                'status' => 'pending',
+                'error_code' => null,
+                'error_message' => null,
+            ]);
+        });
+
+        return $this->executeVoid($payment, $attempt, $providerReference);
+    }
+
+    private function executeVoid(Payment $payment, PaymentAttempt $attempt, ?string $providerReference): Payment
+    {
         try {
             $result = $this->gateways->for($payment->gateway)->void(new VoidPaymentData(
                 payment: $payment,
                 attempt: $attempt,
                 amount: Money::fromMinor($payment->amount_minor, $payment->currency),
-                providerReference: $this->providerReference->forCapture($payment),
+                providerReference: $providerReference,
             ));
         } catch (\Throwable $e) {
             $attempt->update([
@@ -158,5 +198,16 @@ final class VoidPaymentAuthorization
         });
 
         return $payment;
+    }
+
+    private function voidPayloadHash(Payment $payment, ?string $providerReference): string
+    {
+        return hash('sha256', CanonicalJson::encode([
+            'payment_id' => $payment->id,
+            'provider_reference' => $providerReference,
+            'requested_amount_minor' => $payment->amount_minor,
+            'currency' => $payment->currency,
+            'operation' => 'void',
+        ]));
     }
 }

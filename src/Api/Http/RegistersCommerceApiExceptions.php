@@ -6,6 +6,7 @@ use EzEcommerce\Cart\Exceptions\CartTotalsChangedException;
 use EzEcommerce\Cart\Exceptions\CartVersionConflictException;
 use EzEcommerce\Core\Exceptions\IdempotencyConflictException;
 use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
+use EzEcommerce\Payments\Exceptions\ConflictingPaymentOperationException;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -72,6 +73,17 @@ final class RegistersCommerceApiExceptions
                 'message' => $e->getMessage(),
                 'code' => 'payment_operation_not_supported',
             ], 422);
+        });
+
+        $handler->renderable(function (ConflictingPaymentOperationException $e, Request $request): ?Response {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'code' => 'conflicting_payment_operation',
+            ], 409);
         });
 
         $handler->renderable(function (InvalidArgumentException $e, Request $request): ?Response {

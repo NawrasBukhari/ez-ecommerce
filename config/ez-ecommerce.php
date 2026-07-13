@@ -101,6 +101,13 @@ return [
         'require_fulfillment_for_completion' => filter_var(env('COMMERCE_ORDERS_REQUIRE_FULFILLMENT', true), FILTER_VALIDATE_BOOLEAN),
     ],
 
+    'outbox' => [
+        // At-least-once delivery guarantee. Consumers must be idempotent.
+        'lease_seconds' => (int) env('COMMERCE_OUTBOX_LEASE_SECONDS', 60),
+        'max_attempts' => (int) env('COMMERCE_OUTBOX_MAX_ATTEMPTS', 5),
+        'backoff_seconds' => (int) env('COMMERCE_OUTBOX_BACKOFF_SECONDS', 30),
+    ],
+
     'multi_store' => [
         'default_store_id' => env('COMMERCE_DEFAULT_STORE_ID'),
     ],

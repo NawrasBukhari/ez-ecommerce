@@ -10,6 +10,7 @@ use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Refunds\Models\Refund;
+use EzEcommerce\Refunds\Policies\RefundTransitionPolicy;
 use EzEcommerce\Webhooks\Inbound\Exceptions\InboundWebhookConflictException;
 use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -21,14 +22,17 @@ final class ReconcileRefund
         private readonly Clock $clock,
         private readonly PaymentGatewayRegistry $gateways,
         private readonly RefundPayment $refundPayment,
+        private readonly RefundTransitionPolicy $refundTransitionPolicy,
     ) {
     }
 
     public function isRefundEvent(string $gateway, string $eventType): bool
     {
         return match ($gateway) {
+            // charge.refunded is intentionally excluded: it correlates weakly to a
+            // specific refund object and carries no per-refund metadata. The
+            // refund.* events are the primary refund-state signal.
             'stripe' => in_array($eventType, [
-                'charge.refunded',
                 'refund.created',
                 'refund.updated',
                 'refund.failed',
@@ -144,11 +148,23 @@ final class ReconcileRefund
                         ),
                     );
                 } elseif ($outcome === 'pending') {
-                    $refund->update(['status' => RefundStatus::Pending]);
-                    $attempt->update(['status' => 'pending']);
+                    $lockedRefund = Refund::query()->lockForUpdate()->find($refund->id);
+                    $lockedAttempt = PaymentAttempt::query()->lockForUpdate()->find($attempt->id);
+                    if ($lockedRefund !== null
+                        && $lockedAttempt !== null
+                        && $this->refundTransitionPolicy->canTransition($lockedRefund->status, RefundStatus::Pending)) {
+                        $lockedRefund->update(['status' => RefundStatus::Pending]);
+                        $lockedAttempt->update(['status' => 'pending']);
+                    }
                 } elseif ($outcome === 'failed') {
-                    $refund->update(['status' => RefundStatus::Failed]);
-                    $attempt->update(['status' => 'failed']);
+                    $lockedRefund = Refund::query()->lockForUpdate()->find($refund->id);
+                    $lockedAttempt = PaymentAttempt::query()->lockForUpdate()->find($attempt->id);
+                    if ($lockedRefund !== null
+                        && $lockedAttempt !== null
+                        && $this->refundTransitionPolicy->canTransition($lockedRefund->status, RefundStatus::Failed)) {
+                        $lockedRefund->update(['status' => RefundStatus::Failed]);
+                        $lockedAttempt->update(['status' => 'failed']);
+                    }
                 }
 
                 $record->update([

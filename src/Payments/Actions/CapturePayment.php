@@ -5,7 +5,6 @@ namespace EzEcommerce\Payments\Actions;
 use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
-use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\CapturePaymentData;
 use EzEcommerce\Payments\Data\PaymentResult;
@@ -24,10 +23,9 @@ final class CapturePayment
     public function __construct(
         private readonly PaymentGatewayRegistry $gateways,
         private readonly ResolveProviderPaymentReference $providerReference,
-        private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
-        private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
-        private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
+        private readonly HandleCaptureResult $handleCaptureResult,
         private readonly PaymentOperationPolicy $paymentOperationPolicy,
+        private readonly AssertNoConflictingPaymentOperation $assertNoConflictingPaymentOperation,
     ) {
     }
 
@@ -73,6 +71,8 @@ final class CapturePayment
                 throw new RuntimeException('Order is cancelled or completed, or payment is not in a capturable state.');
             }
 
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'capture');
+
             $captureAmount = $amount ?? Money::fromMinor(
                 $locked->amount_minor - $locked->captured_minor,
                 $locked->currency,
@@ -96,6 +96,10 @@ final class CapturePayment
             if (! $gateway->capabilities()->capture) {
                 throw PaymentOperationNotSupported::for($locked->gateway, 'capture');
             }
+
+            // Reject an unsupported partial capture before inserting any attempt
+            // row, so a disabled-config rejection leaves no pending/unknown orphan.
+            $this->assertPartialCaptureAllowed($locked, $captureAmount);
 
             return PaymentAttempt::query()->create([
                 'payment_id' => $locked->id,
@@ -121,6 +125,15 @@ final class CapturePayment
             'amount_minor' => $amount->minorAmount,
             'currency' => $amount->currency,
         ]));
+    }
+
+    private function assertPartialCaptureAllowed(Payment $payment, Money $captureAmount): void
+    {
+        if ($payment->gateway === 'stripe'
+            && $captureAmount->minorAmount < ($payment->amount_minor - $payment->captured_minor)
+            && ! config('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false)) {
+            throw new InvalidArgumentException('Partial Stripe capture is not enabled.');
+        }
     }
 
     private function resultFromAttempt(Payment $payment, PaymentAttempt $attempt): PaymentResult
@@ -150,6 +163,8 @@ final class CapturePayment
             if (! $this->paymentOperationPolicy->canCapture($locked)) {
                 throw new RuntimeException('Order is cancelled or completed, or payment is not in a capturable state.');
             }
+
+            $this->assertNoConflictingPaymentOperation->execute($locked, 'capture');
 
             $captureAmount = $amount
                 ?? PaymentAttemptRequest::captureAmount($attempt, $locked)
@@ -208,6 +223,16 @@ final class CapturePayment
         if ($payment->gateway === 'stripe'
             && $amount->minorAmount < ($payment->amount_minor - $payment->captured_minor)
             && ! config('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false)) {
+            // A replay reaching here means the attempt already exists (e.g. a
+            // failed_retryable partial capture retried after partial capture was
+            // disabled). Mark it terminally failed so no pending/unknown orphan
+            // remains, then surface the validation error.
+            $attempt->update([
+                'status' => 'failed',
+                'error_code' => 'partial_capture_disabled',
+                'error_message' => 'Partial Stripe capture is not enabled.',
+            ]);
+
             throw new InvalidArgumentException('Partial Stripe capture is not enabled.');
         }
 
@@ -228,35 +253,10 @@ final class CapturePayment
             throw $e;
         }
 
-        if ($result->success) {
-            try {
-                $this->finalizeAcceptedPayment->execute(
-                    $payment,
-                    $attempt,
-                    $result->amount->minorAmount,
-                    $result->amount->currency,
-                    $result->externalId,
-                    $result->metadata,
-                );
-                $attempt->update(['status' => 'succeeded', 'external_id' => $result->externalId]);
-            } catch (\Throwable $e) {
-                $attempt->update([
-                    'status' => 'unknown',
-                    'error_code' => 'finalize_failed',
-                    'error_message' => $e->getMessage(),
-                ]);
-                $this->recordInventoryFinalizationFailure->execute($payment, $attempt, $e->getMessage());
-
-                throw $e;
-            }
-        } else {
-            $attempt->update([
-                'status' => 'failed',
-                'error_code' => $result->failure?->code,
-                'error_message' => $result->failure?->message,
-            ]);
-            $this->recalculateOrderPaymentStatus->execute($payment->order);
-        }
+        // The gateway PaymentStatus (not a bare success flag) drives finalization.
+        // A provider-accepted but pending capture finalizes nothing until the
+        // completion webhook arrives.
+        $this->handleCaptureResult->execute($payment, $attempt, $result);
 
         return $result;
     }

@@ -24,6 +24,23 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 ## Sprint status (current)
 
+### Shipped (PSP lifecycle sprint 5 — full hardening)
+
+| Area | What landed |
+|------|-------------|
+| **Capture-result semantics** | `HandleCaptureResult` dispatches on gateway `PaymentStatus` (not `success`); PayPal `PENDING` finalizes nothing (no ledger/commit/confirm/outbox) until completion webhook; `PayPalCaptureSemanticsTest` |
+| **Reversal + dispute** | `PaymentStatus::Reversed`, `OrderPaymentStatus::Disputed`, `PaymentTransactionType::Reversal`; `ApplyPaymentReversal` action appends reversal ledger + manual-review metadata; `ReconcilePayment` reversal branch before failure; terminal-monotonic (completion after reversal does not restore); `PaymentReversalTest` |
+| **Transactional at-least-once outbox** | New migration extends `commerce_outbox_messages` (`available_at`, `locked_at`, `locked_until`, `attempts`, `last_error`); `ProcessOutboxJob` exclusive claim + lease + exponential backoff; `FinalizeAcceptedPayment` atomic insert + `DB::afterCommit` dispatch; `commerce:process-outbox` poller; `OutboxWorkerTest` |
+| **Dedupe aggregate rebuild** | `commerce:dedupe-transactions` separates `authorized`/`captured`/`refunded`/`reversed` aggregates (PostgreSQL-safe `havingRaw`); status precedence from ledger; `--dry-run`/`--payment`/`--outbox`; `DedupeTransactionsTest` |
+| **Monotonic refunds** | `RefundTransitionPolicy` (`Succeeded` terminal, `Failed → Succeeded` via reconciliation); `ReconcileRefund` guards pending/failed branches; `charge.refunded` demoted to informational; `RefundMonotonicTest` |
+| **Payment-wide conflict guard** | `AssertNoConflictingPaymentOperation` (capture/void/refund/create_session compatibility matrix); injected into `CapturePayment`/`VoidPaymentAuthorization`/`RefundPayment`/`RetryPaymentSession` inside the lock; `ConflictingPaymentOperationException` → HTTP 409; `PaymentConflictGuardTest` |
+| **Complete void idempotency** | `failed` → cached terminal failure (no duplicate row); `failed_retryable` → reuse attempt; payload-hash mismatch rejection; tests for every state |
+| **Partial-capture ordering** | Stripe partial-capture config check before attempt row creation (no `pending`/`unknown` orphan); replay marks attempt terminally `failed` if disabled later |
+| **Refund policy enforcement** | `PaymentOperationPolicy::canRefund()` guarded inside lock before reserving funds; rejected for cancelled/failed/authorized-only/pending/fully-refunded/zero-balance |
+| **Multi-process test harness** | `tests/bin/worker.php` reads `DB_*`, no `RefreshDatabase`, JSON stdout, exit codes; `ConcurrencyRaceTest` in `tests/Races` with 8 two-process races; `RaceTestCase` disables per-test txn so children see committed data |
+| **Isolated installation test** | `PackageInstallationTest` in `tests/Installation` via `InstallationTestCase` (no `loadMigrationsFrom`); verifies `runsMigrations()` discovery, columns/indexes, unique constraints, commands |
+| **Tests** | 208 Pest tests across 24 feature files |
+
 ### Shipped (PSP lifecycle sprint 4)
 
 | Area | What landed |
@@ -54,7 +71,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Fulfillment recovery** | `UniqueConstraintViolationException` caught outside `DB::transaction` (PG-safe); payload-fingerprint mismatch rejected |
 | **Unmatched webhook persistence** | `ReconcileRefund`/`ReconcilePayment` persist `unmatched` before correlation; unknown provider statuses no longer marked `processed` |
 | **Void reconciliation** | `ReconcileVoidAttempt` action + `commerce:reconcile-voids` command |
-| **OrderPaid outbox** | Unique outbox row keyed `order.paid:{order_id}` replaces metadata flag; exactly-once under concurrency + crash recovery |
+| **OrderPaid outbox** | Unique outbox row keyed `order.paid:{order_id}` replaces metadata flag; at-least-once under concurrency + crash recovery (idempotent consumers required) |
 | **Failure webhooks** | Stripe `payment_intent.payment_failed`/`canceled` and PayPal `PAYMENT.CAPTURE.DENIED` → `PaymentStatus::Failed` |
 | **Cancel/complete locking** | Both actions `lockForUpdate` the order row before transitioning |
 | **Config + commands** | `orders.require_fulfillment_for_completion` published; `commerce:dedupe-transactions` for upgrade preflight |
@@ -99,7 +116,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Cart** | Expiry enforcement, `price_list_id` on calculate/checkout |
 | **Shipping/Tax** | `GET /shipping-methods`, weight shipping + jurisdiction tax drivers |
 | **Webhooks** | Delivery retry, more outbound events, inbound event log API |
-| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records`, `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations`, `commerce:reconcile-voids`, `commerce:dedupe-transactions` |
+| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records`, `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations`, `commerce:reconcile-voids`, `commerce:dedupe-transactions`, `commerce:process-outbox`, `commerce:replay-webhooks` |
 
 ### Still not built (do not assume)
 
@@ -119,9 +136,11 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 4. **Refunds ≠ returns ≠ restock.** Three separate action families; do not merge them.
 5. **Polymorphic refs use morph aliases** (`commerce_product_variant`, etc.), not FQCNs. Register host models via `EzEcommerce::morphMap([...])`.
 6. **Orders, payments, inventory models are package-controlled** — not swappable via config class names.
-7. **Idempotency is required** for checkout and financial/order mutations on the API (`Idempotency-Key` header on checkout, capture, refund, retry-payment, cancel, complete, fulfill).
+7. **Idempotency is required** for checkout and financial/order mutations on the API (`Idempotency-Key` header on checkout, capture, refund, retry-payment, cancel, complete, fulfill). Reused keys replay the cached terminal result; a reused key with a different payload throws `IdempotencyPayloadMismatchException`; `failed` void keys do **not** create a duplicate row.
 8. **Money is always integer minor units** via `EzEcommerce\Core\Money\Money`. Never use floats for money.
-9. **Lazy senior dev mode:** smallest correct diff; no new abstractions unless asked; no new dependencies unless necessary.
+9. **The outbox is at-least-once.** `order.paid` outbox delivery may repeat across crashes/restarts; consumers must be idempotent. The unique `order.paid:{order_id}` key prevents duplicate *inserts*, not duplicate *deliveries*. Never call payment gateways inside the outbox dispatch path.
+10. **Reversal is terminal.** A `Reversed` payment never auto-restores to `Captured`; the order goes to `Disputed` for manual review. `ApplyPaymentReversal` appends one `Reversal` ledger row and is idempotent on `external_id`.
+11. **Lazy senior dev mode:** smallest correct diff; no new abstractions unless asked; no new dependencies unless necessary.
 
 ---
 
@@ -153,7 +172,9 @@ src/
   Webhooks/         Inbound controller + outbound dispatch/delivery
 routes/api.php      Versioned REST API
 database/migrations commerce_* tables
-tests/Feature/      102 Pest tests — see README test matrix
+tests/Feature/      Pest feature tests — see README test matrix
+tests/Races/        Two-process MySQL/PostgreSQL race tests (RaceTestCase, no per-test txn)
+tests/Installation/ Isolated package-installation regression test (InstallationTestCase)
 ```
 
 ---
@@ -260,9 +281,12 @@ Public checkout payment methods: `checkout.public_payment_methods` (default `['s
 3. **Using FQCN in `purchasable_type`** — breaks morph map; use aliases.
 4. **Expecting `features.*` to add routes** — `api` flag gates the API provider; `subscriptions`, `marketplace`, `b2b`, and `outbound_webhooks` default **off** and gate their service providers. Enable in config (and in tests via `TestCase`) before using those modules.
 5. **Using `country` column on addresses** — DB column is `country_code`; API accepts `country` in JSON.
-6. **Assuming tests = full PSP coverage** — Stripe/PayPal/Telr live sandbox paths are not contract-tested in CI.
+6. **Assuming tests = full PSP coverage** — Stripe/PayPal/Telr live sandbox paths are not contract-tested in CI. This is the single biggest remaining honesty gap.
 7. **Skipping `Idempotency-Key` on order mutations** — cancel, complete, fulfill, capture, refund, and retry-payment all require it on the API.
 8. **Creating `commerce:migrate`** — migrations auto-load; host runs `migrate`.
+9. **Assuming the outbox is exactly-once** — it is at-least-once; consumers must be idempotent. The unique key prevents duplicate inserts, not duplicate deliveries.
+10. **Treating a `failed` void key as retriable with the same key** — `failed` is terminal; replay returns the cached failure without a new row. Use a new key for a fresh void attempt.
+11. **Restoring a `Reversed` payment to `Captured`** — reversal is terminal; a late completion webhook must not un-reverse.
 
 ---
 
@@ -276,7 +300,7 @@ vendor\bin\pint --dirty
 vendor\bin\phpstan analyse
 ```
 
-Test harness: Orchestra Testbench, SQLite in-memory, `tests\TestCase.php` sets `COMMERCE_API_TOKEN=test-api-token`.
+Test harness: Orchestra Testbench, SQLite in-memory (default), MySQL 8 / PostgreSQL 16 for `--group=hardening`. `tests\TestCase.php` sets `COMMERCE_API_TOKEN=test-api-token` and `loadMigrationsFrom`. `tests/Races/` uses `RaceTestCase` (no per-test transaction, so child worker processes see committed data). `tests/Installation/` uses `InstallationTestCase` (no `loadMigrationsFrom` — proves `runsMigrations()` discovery). Race workers (`tests/bin/worker.php`) read `DB_*` env vars and print JSON.
 
 ---
 

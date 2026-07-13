@@ -177,37 +177,68 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 
 ## Production readiness
 
-**Overall: 7.4/10** — strong beta commerce engine; PSP paths closing fast but still have provider-semantics blockers.  
-*Current head: `606d3b7` — payment lifecycle hardening + PSP semantics fixes.*
+**Overall: 7.8/10** — strong beta commerce engine; PSP paths hardened with capture-result semantics, reversal/dispute handling, a transactional at-least-once outbox, and multi-process race coverage.  
+*Current head: `e2a1cc3` — PSP lifecycle sprint 5 full hardening.*
 
 | Area | Rating |
 |------|--------|
 | Package architecture | 9/10 |
-| Orders and inventory | 8.5/10 |
-| Checkout transaction design | 8/10 |
-| Manual/null payments | 8.5/10 |
-| Headless REST API | 7/10 |
-| Stripe integration | 6.5/10 |
-| PayPal integration | 6.5/10 |
+| Orders and inventory | 9/10 |
+| Checkout transaction design | 8.5/10 |
+| Manual/null payments | 9/10 |
+| Headless REST API | 7.5/10 |
+| Stripe integration | 7/10 |
+| PayPal integration | 7/10 |
 | Telr integration | 5.5/10 |
-| Tests and CI | 6/10 |
+| Tests and CI | 7.5/10 |
 
 ### Classification
 
 | Tier | Verdict |
 |------|---------|
 | **Core / manual commerce** | Strong beta |
-| **Inventory + order lifecycle** | Close to production after concurrent tests |
+| **Inventory + order lifecycle** | Production-ready after hardening sprint 5 |
 | **REST storefront checkout** | Functional — fail-closed price lists, address-aware quoting |
-| **Stripe** | Authorization + voiding supported; refund state mapping fixed; manual capture safe |
-| **PayPal** | Refund state mapping fixed (PENDING/COMPLETED/FAILED); pending capture still open |
+| **Stripe** | Authorization + voiding; refund state mapping; partial-capture validation; manual capture safe |
+| **PayPal** | Capture semantics fixed (PENDING finalizes nothing); reversal/dispute handling; refund state mapping |
 | **Telr** | Safer sessions/refunds — capability enforcement improving |
 
 Before treating payments as production-ready:
 
-1. Run `vendor/bin/pest --group=hardening` on **MySQL** (CI does this).
+1. Run `vendor/bin/pest --group=hardening` on **MySQL and PostgreSQL** (CI does both).
 2. Configure real webhook secrets and API tokens (never `COMMERCE_API_ALLOW_UNAUTHENTICATED=true` in prod).
 3. Exercise operator commands for your PSP (`commerce:reconcile-*`). Think of them as commerce therapy for when the network blinks mid-capture.
+
+### Payment status behavior
+
+| State | Meaning | What finalizes it |
+|-------|---------|-------------------|
+| `Authorized` | Authorization held, no capture yet | Capture / void |
+| `Pending` (capture) | Provider accepted the capture call but funds are still pending (PayPal PENDING) | Completion webhook (`PAYMENT.CAPTURE.COMPLETED`) |
+| `Captured` | Full capture recorded in the ledger | Refund / reversal |
+| `PartiallyCaptured` | Partial capture recorded; remaining authorization preserved | Further capture / refund |
+| `Reversed` / order `Disputed` | Provider reversed a completed capture (PayPal `PAYMENT.CAPTURE.REVERSED`) | Manual review — terminal, no auto-restore |
+| `PartiallyRefunded` / `Refunded` | Refund ledger rows recorded | — |
+| `Cancelled` | Authorization voided | — |
+| `Failed` | Provider declined / payment failed | Retry session / new attempt |
+
+### Outbox delivery guarantee
+
+The `order.paid` outbox is **at-least-once** with idempotent consumers required. Finalization inserts a unique `order.paid:{order_id}` row atomically with order confirmation and inventory commit; `ProcessOutboxJob` claims exclusively with a lease, retries with exponential backoff (`failed_retryable`), and marks `failed_terminal` after the configured attempt budget. **Consumers must be idempotent** — the same `OrderPaid` event may be delivered more than once across crashes/restarts. There is no exactly-once guarantee; the unique outbox key only prevents duplicate *inserts*, not duplicate *deliveries*.
+
+### PSP lifecycle sprint 5 — full hardening (current)
+
+- **Capture-result semantics** — `HandleCaptureResult` dispatches on gateway `PaymentStatus` (not a `success` flag); PayPal `PENDING` captures finalize nothing (no ledger row, no inventory commit, no `order.paid`) until the completion webhook
+- **Payment reversal + dispute** — `PaymentStatus::Reversed` / `OrderPaymentStatus::Disputed` / `PaymentTransactionType::Reversal`; `ApplyPaymentReversal` action appends a reversal ledger row and marks the order for manual review; completion webhooks arriving after a reversal do not restore `Captured`
+- **Transactional at-least-once outbox** — exclusive claim + lease + exponential backoff retry; `FinalizeAcceptedPayment` inserts the outbox row atomically with confirmation + inventory commit and dispatches via `DB::afterCommit`; `commerce:process-outbox` polls as the safety net
+- **Dedupe aggregate rebuild** — `commerce:dedupe-transactions` separates `authorized_minor`/`captured_minor`/`refunded_minor`/`reversed_minor` (PostgreSQL-safe `havingRaw`); status derived from the ledger with documented precedence
+- **Monotonic refund transitions** — `RefundTransitionPolicy` guards `Succeeded` as terminal; explicit reconciliation path for `Failed → Succeeded`; `charge.refunded` demoted to informational (weak correlation)
+- **Payment-wide conflict guard** — `AssertNoConflictingPaymentOperation` blocks incompatible in-flight operations (capture/void/refund/create_session) on the same payment; mapped to HTTP 409
+- **Complete void idempotency** — `failed` keys replay the cached terminal failure (no duplicate row); `failed_retryable` reuses the attempt; payload-hash mismatch rejection
+- **Partial-capture validation ordering** — Stripe partial-capture config check runs before any attempt row is created (no `pending`/`unknown` orphan)
+- **Refund policy enforcement** — `PaymentOperationPolicy::canRefund()` guarded inside the lock before reserving funds (cancelled order, failed, authorized-only, pending, fully refunded, zero-balance all rejected)
+- **Multi-process test harness** — `tests/bin/worker.php` reads `DB_*` env, prints JSON, asserts exit codes; 8 two-process races on MySQL/PostgreSQL
+- **Isolated installation test** — `PackageInstallationTest` verifies migration discovery via `runsMigrations()` without `loadMigrationsFrom`
 
 ### Recently fixed (PSP lifecycle sprint 3)
 
@@ -220,7 +251,7 @@ Before treating payments as production-ready:
 - **Fulfillment recovery outside tx** — `UniqueConstraintViolationException` caught outside `DB::transaction` (PG-safe); payload-fingerprint mismatch rejected via `IdempotencyPayloadMismatchException`
 - **Unmatched webhook persistence** — `ReconcileRefund`/`ReconcilePayment` persist `ProcessedGatewayEvent` as `unmatched` before correlation; unknown provider statuses no longer marked `processed`
 - **Void reconciliation** — `ReconcileVoidAttempt` action + `commerce:reconcile-voids` command; operators can confirm/fail unknown void attempts
-- **OrderPaid exactly-once outbox** — unique outbox row keyed `order.paid:{order_id}` replaces the metadata flag; concurrent finalizers and crash recovery no longer double-dispatch
+- **OrderPaid at-least-once outbox** — unique outbox row keyed `order.paid:{order_id}` replaces the metadata flag; concurrent finalizers and crash recovery no longer double-insert. Delivery is at-least-once (idempotent consumers required)
 - **Provider failure webhooks** — Stripe `payment_intent.payment_failed`/`canceled` and PayPal `PAYMENT.CAPTURE.DENIED` transition payments to `Failed`
 - **Cancel/complete row-locking** — both actions lock the order row before transitioning
 - **Orders config published** — `orders.require_fulfillment_for_completion` now in `config/ez-ecommerce.php`
@@ -250,12 +281,10 @@ Before treating payments as production-ready:
 
 ### Remaining production blockers
 
-Most sprint blockers from the `8f5633a8` review are now addressed in code. The PSP lifecycle sprint 3 closed the Stripe cancel argument order, authorization ordering, partial capture amount, PayPal refund correlation, and PostgreSQL fulfillment recovery. Remaining gaps before calling PSP paths production-grade:
+Most sprint blockers from the `8f5633a8` review are now addressed in code. PSP lifecycle sprint 5 closed capture-result semantics, reversal/dispute handling, the transactional outbox, monotonic refunds, the payment-wide conflict guard, void idempotency, partial-capture ordering, refund-policy enforcement, and multi-process race coverage. Remaining gaps before calling PSP paths production-grade:
 
-1. **Real PSP contract tests** — gateway drivers tested via fakes/mocks only; no Stripe/PayPal/Telr sandbox CI
-2. **Multi-process race tests** — sequential Pest + row locks; true multi-process CI still open
-3. **PayPal pending capture reconciliation** — `PAYMENT.CAPTURE.PENDING` keeps payments `Pending` but no async completion path
-4. **True outbox dispatcher** — the outbox row is inserted atomically, but a dedicated outbox poller job is still host-side work
+1. **Real PSP contract tests** — gateway drivers tested via fakes/mocks only; no Stripe/PayPal/Telr sandbox CI. This is the single biggest remaining honesty gap.
+2. **Host-side outbox worker** — `commerce:process-outbox` and `ProcessOutboxJob` exist, but the host must run a queue worker + schedule the polling command as a safety net (see [Artisan commands & scheduler](#artisan-commands--scheduler)).
 
 ### Recently fixed (latest sprint)
 
@@ -280,7 +309,7 @@ Most sprint blockers from the `8f5633a8` review are now addressed in code. The P
 | **Manual / null checkout** | Strong beta | Idempotent checkout, inventory, capture, fulfill, refund, reconciliation |
 | **Headless REST API** | Beta | Full surface; scoped tokens; guest + admin auth |
 | **Stripe** | Integration prototype | Manual capture; authorization + voiding; refund state mapping; ledger uses `ch_*` — verify before live money |
-| **PayPal** | Integration prototype | Order capture; refund state mapping (PENDING/COMPLETED/FAILED); pending capture still open; `PAYPAL_WEBHOOK_ID` for native verify |
+| **PayPal** | Integration prototype | Order capture; capture-result semantics fixed (PENDING finalizes nothing); reversal/dispute; refund state mapping; `PAYPAL_WEBHOOK_ID` for native verify |
 | **Telr** | Sessions + refunds only | No capture; attempts rejected before PSP call |
 
 ---
@@ -370,6 +399,8 @@ Your App (API/UI)
 5. **Morph aliases** (`commerce_product_variant`) — not FQCNs in polymorphic columns.
 6. **Unknown PSP attempts block conflicts** until operator reconciliation.
 7. **Webhook inbox ID ≠ ledger transaction ID** — separate `eventId`, `paymentReference`, `transactionReference`.
+8. **Outbox is at-least-once** — consumers must be idempotent. The unique `order.paid:{order_id}` key prevents duplicate inserts, not duplicate deliveries.
+9. **Reversal is terminal** — a `Reversed` payment never auto-restores to `Captured`; the order goes to `Disputed` for manual review.
 
 ---
 
@@ -478,8 +509,8 @@ Default: `COMMERCE_PAYMENT_DRIVER=manual`. Override per checkout with `->payment
 | `null` | Auto on zero total | No | No | Free orders only |
 | `fake` | Test double | Test double | Yes | Testing only — do not point this at your CFO |
 | `net_terms` | Deferred (manual gateway) | Yes | No | B2B; terms on order metadata |
-| `stripe` | Manual PI + capture endpoint | Yes | Yes | `capture_method=manual`; idempotency on session/capture/refund |
-| `paypal` | Server capture of approved order | Yes | Yes | Does not treat approval as capture; order ID for lookup |
+| `stripe` | Manual PI + capture endpoint | Yes | Yes | `capture_method=manual`; partial-capture validation; idempotency on session/capture/refund |
+| `paypal` | Server capture of approved order | Yes | Yes | Capture-result semantics fixed (PENDING finalizes nothing); reversal/dispute; refund state mapping |
 | `telr` | **Not supported** | Verified HTTP | Yes | Session redirect; success from callback only — capture is not a vibe Telr supports |
 
 ### Capture → inventory flow
@@ -488,7 +519,7 @@ Default: `COMMERCE_PAYMENT_DRIVER=manual`. Override per checkout with `->payment
 
 1. Checkout creates order + reservation + payment session (outside txn).
 2. Capture records ledger transaction with provider `transactionReference`.
-3. On **full** capture: commit reservation, confirm order, dispatch `OrderPaid` (once).
+3. On **full** capture: commit reservation, confirm order, insert `order.paid:{order_id}` outbox row atomically, dispatch `OrderPaid` via `DB::afterCommit` (at-least-once; `commerce:process-outbox` is the safety net).
 4. If inventory commit fails after capture: `manual_review_required` on order; use `commerce:reconcile-finalizations`.
 
 Partial capture updates payment status but does **not** release goods (fulfillment requires full `Captured` for PSP payments).
@@ -597,10 +628,13 @@ Recommended scheduler in the host app:
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('commerce:release-expired-reservations')->everyFiveMinutes();
+Schedule::command('commerce:process-outbox')->everyMinute();
 Schedule::command('commerce:renew-subscriptions')->hourly();
 Schedule::command('commerce:purge-expired-carts')->daily();
 Schedule::command('commerce:purge-idempotency-records')->daily();
 ```
+
+> **Outbox:** `commerce:process-outbox` is the at-least-once safety net. Run it every minute (or rely on `ProcessOutboxJob` via a queue worker). Without one of these, `order.paid` events stay `pending` after crashes. Consumers **must** be idempotent.
 
 ---
 
@@ -658,6 +692,10 @@ vendor/bin/pint --dirty
 vendor/bin/phpstan analyse --memory-limit=512M
 ```
 
+### Required idempotency headers
+
+Every financial/order mutation on the REST API requires an `Idempotency-Key` header (or `idempotency_key` body field on refund): `POST /checkout`, `POST /orders/{id}/capture`, `/refund`, `/retry-payment`, `/cancel`, `/complete`, `/fulfill`. A reused key replays the cached result for terminal states; a reused key with a different payload throws `IdempotencyPayloadMismatchException` (422); an in-flight key returns a deterministic conflict (409). Omitting the key on these endpoints returns 422.
+
 ### CI (GitHub Actions)
 
 | Job | What it runs |
@@ -666,11 +704,41 @@ vendor/bin/phpstan analyse --memory-limit=512M
 | **Hardening (MySQL)** | `pest --group=hardening` on MySQL 8 |
 | **Hardening (PostgreSQL)** | `pest --group=hardening` on PostgreSQL 16 |
 
+### Running hardening locally (PowerShell)
+
+Two-process race tests (`tests/Races`) and the `--group=hardening` suite need MySQL or PostgreSQL — SQLite skips them. Against a local MySQL 8:
+
+```powershell
+$env:DB_CONNECTION = "mysql"
+$env:DB_HOST = "127.0.0.1"
+$env:DB_PORT = "3306"
+$env:DB_DATABASE = "testing"
+$env:DB_USERNAME = "root"
+$env:DB_PASSWORD = ""
+vendor\bin\pest --group=hardening
+Remove-Item Env:DB_CONNECTION, Env:DB_HOST, Env:DB_PORT, Env:DB_DATABASE, Env:DB_USERNAME, Env:DB_PASSWORD
+```
+
+Against PostgreSQL 16:
+
+```powershell
+$env:DB_CONNECTION = "pgsql"
+$env:DB_HOST = "127.0.0.1"
+$env:DB_PORT = "5432"
+$env:DB_DATABASE = "testing"
+$env:DB_USERNAME = "postgres"
+$env:DB_PASSWORD = "postgres"
+vendor\bin\pest --group=hardening
+Remove-Item Env:DB_CONNECTION, Env:DB_HOST, Env:DB_PORT, Env:DB_DATABASE, Env:DB_USERNAME, Env:DB_PASSWORD
+```
+
+Child worker processes (`tests/bin/worker.php`) read these same `DB_*` vars, so race tests inherit the connection automatically.
+
 Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conflicts. PHPStan and Canvas have… history.
 
-### Test suite (149 tests, 16 files)
+### Test suite (208 tests, 24 files)
 
-*149 tests can't prove your checkout works in prod, but 149 failures can prove it doesn't work in CI. Start there.*
+*208 tests can't prove your checkout works in prod, but 208 failures can prove it doesn't work in CI. Start there.*
 
 CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=hardening`).
 
@@ -679,11 +747,17 @@ CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=harde
 | `CommerceFlowTest` | Boot, cart→checkout, idempotency, money |
 | `HardeningTest` | Manual capture, fulfill, refund, OOS |
 | `CorrectnessHardeningTest` | Unknown captures/refunds, `OrderPaid`, reconciliation |
-| `PaymentLifecycleHardeningTest` | Capture/refund lifecycle, `OrderPaid` outbox exactly-once |
-| `PspLifecycleSprint3Test` | PSP sprint 3: partial capture, monotonic auth, void replay, outbox, failure webhooks |
-| `PackageInstallationTest` | Migration auto-load via `runsMigrations`, command registration |
+| `PaymentLifecycleHardeningTest` | Capture/refund lifecycle, `OrderPaid` outbox at-least-once |
+| `PspLifecycleSprint3Test` | PSP sprint 3+5: partial capture, monotonic auth, void idempotency replay, outbox, failure webhooks, partial-capture ordering |
+| `PayPalCaptureSemanticsTest` | PayPal PENDING finalizes nothing; completion finalizes once; partial-capture preservation |
+| `PaymentReversalTest` | Reversal ledger + Disputed/manual-review; monotonic vs delayed completion |
+| `OutboxWorkerTest` | Exclusive claim, lease expiry, retry/terminal, crash recovery, unique key |
+| `DedupeTransactionsTest` | Aggregate rebuild (auth/capture/refund/reversal separation), status precedence |
+| `RefundMonotonicTest` | Monotonic refund transitions, refund-policy rejection for every non-refundable state |
+| `PaymentConflictGuardTest` | Payment-wide conflict guard (capture/void/refund/session compatibility) |
+| `PackageInstallationTest` | Migration discovery via `runsMigrations()` (no `loadMigrationsFrom`), unique indexes, commands |
 | `StripeVoidStatesTest` | Stripe void across all cancellable PaymentIntent states |
-| `ConcurrencyRaceTest` | Two-process MySQL/PostgreSQL race tests (fulfillment, outbox, void) |
+| `ConcurrencyRaceTest` | Two-process MySQL/PostgreSQL races: fulfillment, capture, capture-vs-void, refunds, outbox claim, last-stock checkout, capture-vs-expiry, idempotent refund |
 | `ApiTest` / `ApiExtendedTest` | REST surface, token auth, capture/fulfill |
 | `SecurityTest` | Fail-closed API, scopes, webhook auth |
 | `SprintApiTest` | Customers, cart merge, retry payment, returns |

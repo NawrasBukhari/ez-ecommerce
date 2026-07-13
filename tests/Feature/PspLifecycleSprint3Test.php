@@ -4,12 +4,15 @@ use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Events\OrderPaid;
+use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Models\OutboxMessage;
+use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Fulfillment\Actions\CreateFulfillment;
 use EzEcommerce\Orders\Actions\CancelOrder;
 use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Payments\Actions\CapturePayment;
 use EzEcommerce\Payments\Actions\ReconcilePayment;
 use EzEcommerce\Payments\Actions\ReconcileVoidAttempt;
 use EzEcommerce\Payments\Actions\VoidPaymentAuthorization;
@@ -20,6 +23,7 @@ use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
+use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
 use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
 use Illuminate\Support\Facades\Event;
@@ -375,6 +379,227 @@ it('void idempotency key in pending throws rather than creating a duplicate', fu
 
     expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, $key))
         ->toThrow(RuntimeException::class);
+})->group('hardening');
+
+it('void idempotency key in unknown requires reconciliation without a provider call', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-unknown-'.uniqid();
+
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => $key,
+        'status' => 'unknown',
+        'error_code' => 'void_exception',
+        'error_message' => 'network lost',
+    ]);
+
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, $key))
+        ->toThrow(RuntimeException::class, 'requires reconciliation');
+
+    // No new attempt row, no void transaction, payment still authorized.
+    expect(PaymentAttempt::query()->where('payment_id', $payment->id)->where('operation', 'void')->count())->toBe(1)
+        ->and(PaymentTransaction::query()->where('payment_id', $payment->id)->where('type', PaymentTransactionType::Void)->exists())->toBeFalse()
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::Authorized);
+})->group('hardening');
+
+it('void idempotency key in failed replays the cached terminal failure without a duplicate row', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-failed-'.uniqid();
+
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => $key,
+        'status' => 'failed',
+        'error_code' => 'void_denied',
+        'error_message' => 'authorization already captured',
+    ]);
+
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, $key))
+        ->toThrow(RuntimeException::class, 'previously failed terminally');
+
+    // The UNIQUE(payment_id, idempotency_key) duplicate-key error never reaches
+    // the API: the failed attempt is the only void row for this key.
+    expect(PaymentAttempt::query()->where('payment_id', $payment->id)->where('operation', 'void')->where('idempotency_key', $key)->count())->toBe(1)
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::Authorized);
+})->group('hardening');
+
+it('void idempotency key in failed_retryable reuses the existing attempt and succeeds', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-retryable-'.uniqid();
+
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => $key,
+        'status' => 'failed_retryable',
+        'error_code' => 'void_timeout',
+        'error_message' => 'transient timeout',
+    ]);
+
+    $result = app(VoidPaymentAuthorization::class)->execute($payment, $key);
+    expect($result->fresh()->status)->toBe(PaymentStatus::Cancelled);
+
+    // The existing attempt was reused (reset to pending then succeeded); no
+    // second void attempt row was created for the same key.
+    $voidAttempts = PaymentAttempt::query()
+        ->where('payment_id', $payment->id)
+        ->where('operation', 'void')
+        ->where('idempotency_key', $key)
+        ->get();
+    expect($voidAttempts)->toHaveCount(1)
+        ->and($voidAttempts->first()->status)->toBe('succeeded');
+})->group('hardening');
+
+it('void idempotency key reused with a different payload throws a mismatch exception', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-mismatch-'.uniqid();
+
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => $key,
+        'status' => 'succeeded',
+        'request_metadata' => ['payload_hash' => 'a-completely-different-hash'],
+    ]);
+
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, $key))
+        ->toThrow(IdempotencyPayloadMismatchException::class);
+})->group('hardening');
+
+function registerStripeFakeGateway(?PaymentResult $captureResult = null): void
+{
+    app(PaymentGatewayRegistry::class)->extend('stripe', FakePaymentGateway::class);
+    if ($captureResult !== null) {
+        app()->instance(FakePaymentGateway::class, new FakePaymentGateway(captureResult: $captureResult));
+    }
+}
+
+it('disabled partial capture creates no pending attempt', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $payment->update(['gateway' => 'stripe']);
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false);
+    registerStripeFakeGateway();
+
+    // Request a partial capture (4000 of 10000). Validation must reject before
+    // any attempt row is inserted, leaving no pending/unknown orphan.
+    expect(fn () => app(CapturePayment::class)->executeForPayment(
+        $payment,
+        Money::fromMinor(4000, 'AED'),
+        'partial-disabled-'.uniqid(),
+    ))->toThrow(InvalidArgumentException::class, 'Partial Stripe capture is not enabled.');
+
+    expect(PaymentAttempt::query()->where('payment_id', $payment->id)->where('operation', 'capture')->exists())->toBeFalse()
+        ->and($payment->fresh()->captured_minor)->toBe(0)
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::Authorized);
+})->group('hardening');
+
+it('full capture still works when partial capture is disabled', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $payment->update(['gateway' => 'stripe']);
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false);
+    registerStripeFakeGateway();
+
+    $result = app(CapturePayment::class)->executeForPayment(
+        $payment,
+        Money::fromMinor(10000, 'AED'),
+        'full-when-partial-disabled-'.uniqid(),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::Captured)
+        ->and($payment->fresh()->captured_minor)->toBe(10000);
+})->group('hardening');
+
+it('enabled partial capture stores exact requested amount', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $payment->update(['gateway' => 'stripe']);
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', true);
+    registerStripeFakeGateway(new PaymentResult(
+        success: true,
+        status: PaymentStatus::PartiallyCaptured,
+        amount: Money::fromMinor(4000, 'AED'),
+        externalId: 'fake_partial_'.uniqid(),
+    ));
+
+    $result = app(CapturePayment::class)->executeForPayment(
+        $payment,
+        Money::fromMinor(4000, 'AED'),
+        'partial-enabled-'.uniqid(),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::PartiallyCaptured)
+        ->and($payment->fresh()->captured_minor)->toBe(4000);
+
+    $attempt = PaymentAttempt::query()
+        ->where('payment_id', $payment->id)
+        ->where('operation', 'capture')
+        ->first();
+    expect($attempt->request_metadata['requested_amount_minor'])->toBe(4000);
+})->group('hardening');
+
+it('retrying same partial-capture key uses same amount', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $payment->update(['gateway' => 'stripe']);
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', true);
+    $key = 'partial-replay-'.uniqid();
+    registerStripeFakeGateway(new PaymentResult(
+        success: true,
+        status: PaymentStatus::PartiallyCaptured,
+        amount: Money::fromMinor(4000, 'AED'),
+        externalId: 'fake_partial_'.uniqid(),
+    ));
+
+    app(CapturePayment::class)->executeForPayment($payment, Money::fromMinor(4000, 'AED'), $key);
+
+    // Replay with the same key returns the cached result without a new attempt.
+    $second = app(CapturePayment::class)->executeForPayment($payment, Money::fromMinor(4000, 'AED'), $key);
+    expect($second->success)->toBeTrue();
+
+    $attempts = PaymentAttempt::query()
+        ->where('payment_id', $payment->id)
+        ->where('operation', 'capture')
+        ->where('idempotency_key', $key)
+        ->count();
+    expect($attempts)->toBe(1);
+})->group('hardening');
+
+it('marks a failed_retryable partial-capture attempt terminally failed when partial capture is later disabled', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $payment->update(['gateway' => 'stripe']);
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', true);
+    $key = 'partial-retryable-'.uniqid();
+    registerStripeFakeGateway(new PaymentResult(
+        success: true,
+        status: PaymentStatus::PartiallyCaptured,
+        amount: Money::fromMinor(4000, 'AED'),
+        externalId: 'fake_partial_'.uniqid(),
+    ));
+
+    // An earlier partial capture attempt that failed in a retryable way.
+    $attempt = PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'capture',
+        'idempotency_key' => $key,
+        'status' => 'failed_retryable',
+        'request_metadata' => [
+            'requested_amount_minor' => 4000,
+            'currency' => 'AED',
+            'provider_operation' => 'capture',
+        ],
+    ]);
+
+    // Partial capture is now disabled; the replay must mark the attempt
+    // terminally failed (no pending/unknown orphan) and surface the error.
+    config()->set('ez-ecommerce.drivers.payment.stripe.allow_partial_capture', false);
+
+    expect(fn () => app(CapturePayment::class)->executeForPayment($payment, Money::fromMinor(4000, 'AED'), $key))
+        ->toThrow(InvalidArgumentException::class, 'Partial Stripe capture is not enabled.');
+
+    expect($attempt->fresh()->status)->toBe('failed')
+        ->and($payment->fresh()->captured_minor)->toBe(0);
 })->group('hardening');
 
 it('dispatches OrderPaid exactly once via outbox unique key', function () {

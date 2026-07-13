@@ -25,6 +25,7 @@ final class DefaultPaymentOperationPolicy implements PaymentOperationPolicy
             PaymentStatus::Cancelled,
             PaymentStatus::Refunded,
             PaymentStatus::PartiallyRefunded,
+            PaymentStatus::Reversed,
         ], true);
     }
 
@@ -43,6 +44,7 @@ final class DefaultPaymentOperationPolicy implements PaymentOperationPolicy
             PaymentStatus::Refunded,
             PaymentStatus::PartiallyRefunded,
             PaymentStatus::Failed,
+            PaymentStatus::Reversed,
         ], true);
     }
 

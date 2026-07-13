@@ -3,7 +3,10 @@
 use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Tests\TestCase;
 
-uses(TestCase::class)->in(__DIR__);
+// TestCase + RefreshDatabase for ordinary feature tests. Race tests live in
+// tests/Races and use RaceTestCase (no per-test transaction) so child worker
+// processes can see committed setup data.
+uses(TestCase::class)->in(__DIR__.'/Feature', __DIR__.'/Support');
 
 function placeCheckoutOrder($cart, string $idempotencyKey, ?string $shippingMethod = 'flat', string $paymentMethod = 'manual')
 {

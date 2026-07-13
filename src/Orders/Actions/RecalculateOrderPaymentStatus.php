@@ -22,6 +22,10 @@ final class RecalculateOrderPaymentStatus
         $payments = $order->payments;
         if ($payments->isEmpty()) {
             $status = OrderPaymentStatus::Unpaid;
+        } elseif ($payments->contains(fn ($p) => $p->status === PaymentStatus::Reversed)) {
+            // A reversal (chargeback/provider clawback) has precedence: the order
+            // is disputed and requires manual review, regardless of refund state.
+            $status = OrderPaymentStatus::Disputed;
         } elseif ($payments->contains(fn ($p) => $p->status === PaymentStatus::Failed)) {
             $status = OrderPaymentStatus::Failed;
         } elseif ($payments->contains(fn ($p) => $p->status === PaymentStatus::RequiresAction)) {
