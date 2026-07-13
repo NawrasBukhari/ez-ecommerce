@@ -10,12 +10,10 @@ use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Fulfillment\Actions\CreateFulfillment;
 use EzEcommerce\Orders\Actions\CancelOrder;
 use EzEcommerce\Orders\Models\Order;
-use EzEcommerce\Orders\Models\OrderItem;
 use EzEcommerce\Payments\Actions\ReconcilePayment;
 use EzEcommerce\Payments\Actions\ReconcileVoidAttempt;
 use EzEcommerce\Payments\Actions\VoidPaymentAuthorization;
 use EzEcommerce\Payments\Data\GatewayWebhookEvent;
-use EzEcommerce\Payments\Data\PaymentFailure;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Drivers\FakePaymentGateway;
@@ -167,7 +165,7 @@ it('void with null failure throws RuntimeException not TypeError', function () {
     $this->app->instance(FakePaymentGateway::class, $fake);
 
     expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, 'void-null-'.uniqid())
-        )->toThrow(RuntimeException::class, 'Void failed');
+    )->toThrow(RuntimeException::class, 'Void failed');
 
     $attempt = PaymentAttempt::query()
         ->where('payment_id', $payment->id)
@@ -228,7 +226,7 @@ it('fulfillment rejects mismatched payload for reused idempotency key', function
 
     // Reusing the same key with a different quantity should reject.
     expect(fn () => app(CreateFulfillment::class)->execute($order, $item, 3, $key)
-        )->toThrow(\EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException::class);
+    )->toThrow(\EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException::class);
 })->group('hardening');
 
 it('fulfillment returns existing record on concurrent insert with same key', function () {
@@ -282,6 +280,44 @@ it('persists unmatched refund webhook for later replay', function () {
         ->and($record->status)->toBe('unmatched');
 })->group('hardening');
 
+it('replays an unmatched webhook after correlation data becomes available', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Captured, 10000);
+    $payment->update(['captured_minor' => 10000]);
+
+    $refundEvent = new GatewayWebhookEvent(
+        eventType: 'refund.updated',
+        eventId: 'evt_replay_'.uniqid(),
+        paymentReference: 'replay_refund_id',
+        transactionReference: 'replay_refund_id',
+        amountMinor: 5000,
+        currency: 'AED',
+        providerStatus: 'succeeded',
+    );
+    $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(webhookEvent: $refundEvent));
+
+    // First delivery: unmatched because no local refund attempt exists yet.
+    app(\EzEcommerce\Payments\Actions\ReconcileRefund::class)->execute(new WebhookRequestData(
+        gateway: 'fake',
+        payload: '{"type":"refund.updated"}',
+    ));
+
+    $record = ProcessedGatewayEvent::query()
+        ->where('external_event_id', $refundEvent->eventId)
+        ->first();
+    expect($record->status)->toBe('unmatched');
+
+    // Re-delivery must not be treated as terminal now — re-entry is allowed.
+    app(\EzEcommerce\Payments\Actions\ReconcileRefund::class)->execute(new WebhookRequestData(
+        gateway: 'fake',
+        payload: '{"type":"refund.updated"}',
+    ));
+
+    // Replay command re-runs the reconciler; still unmatched (no attempt exists).
+    \Illuminate\Support\Facades\Artisan::call('commerce:replay-webhooks', ['event-id' => $refundEvent->eventId]);
+    $record->refresh();
+    expect($record->status)->toBe('unmatched');
+})->group('hardening');
+
 it('reconciles an unknown void attempt via operator confirmation', function () {
     [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
 
@@ -304,6 +340,41 @@ it('reconciles an unknown void attempt via operator confirmation', function () {
             ->where('payment_id', $payment->id)
             ->where('type', PaymentTransactionType::Void)
             ->exists())->toBeTrue();
+})->group('hardening');
+
+it('void idempotency key replays a succeeded void without re-calling the gateway', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-replay-'.uniqid();
+
+    $first = app(VoidPaymentAuthorization::class)->execute($payment, $key);
+    expect($first->fresh()->status)->toBe(PaymentStatus::Cancelled);
+
+    // Re-delivery with the same idempotency key returns the cancelled payment
+    // without creating a second void attempt.
+    $second = app(VoidPaymentAuthorization::class)->execute($payment, $key);
+    expect($second->fresh()->status)->toBe(PaymentStatus::Cancelled);
+
+    $voidAttempts = PaymentAttempt::query()
+        ->where('payment_id', $payment->id)
+        ->where('operation', 'void')
+        ->where('idempotency_key', $key)
+        ->count();
+    expect($voidAttempts)->toBe(1);
+})->group('hardening');
+
+it('void idempotency key in pending throws rather than creating a duplicate', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $key = 'void-pending-'.uniqid();
+
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => $key,
+        'status' => 'pending',
+    ]);
+
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, $key))
+        ->toThrow(RuntimeException::class);
 })->group('hardening');
 
 it('dispatches OrderPaid exactly once via outbox unique key', function () {
@@ -329,8 +400,52 @@ it('dispatches OrderPaid exactly once via outbox unique key', function () {
         ->where('key', 'order.paid:'.$result->order->id)
         ->count();
 
+    $outboxRow = OutboxMessage::query()
+        ->where('event', 'order.paid')
+        ->where('key', 'order.paid:'.$result->order->id)
+        ->first();
+
     expect($outboxCount)->toBe(1)
+        ->and($outboxRow->status)->toBe('processed')
         ->and(Event::dispatched(OrderPaid::class))->count()->toBeLessThanOrEqual(1);
+})->group('hardening');
+
+it('recovers OrderPaid dispatch when a pending outbox row is later drained', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $cart = EzEcommerce::cart()->calculateTotals($cart, 'flat');
+    $result = placeCheckoutOrder($cart, 'outbox-recover-'.uniqid(), paymentMethod: 'fake');
+
+    $payment = $result->payment;
+    $attempt = $payment->attempts()->first();
+
+    Event::fake([OrderPaid::class]);
+
+    // Simulate a crash: capture the payment but manually insert a pending outbox
+    // row without running the worker, then drain it.
+    app(\EzEcommerce\Payments\Actions\CapturePayment::class)->execute($payment, $attempt);
+
+    // The capture flow already dispatched the job synchronously; reset the row
+    // to pending to simulate a crash before the worker processed it.
+    OutboxMessage::query()
+        ->where('event', 'order.paid')
+        ->where('key', 'order.paid:'.$result->order->id)
+        ->update(['status' => 'pending', 'processed_at' => null]);
+
+    // Clear previously dispatched events to isolate the recovery.
+    Event::fake([OrderPaid::class]);
+
+    \Illuminate\Support\Facades\Artisan::call('commerce:process-outbox', ['--limit' => 100]);
+
+    $outboxRow = OutboxMessage::query()
+        ->where('event', 'order.paid')
+        ->where('key', 'order.paid:'.$result->order->id)
+        ->first();
+
+    expect($outboxRow->status)->toBe('processed')
+        ->and(Event::dispatched(OrderPaid::class))->count()->toBe(1);
 })->group('hardening');
 
 it('stripe payment_intent.payment_failed webhook transitions payment to Failed', function () {
@@ -353,4 +468,63 @@ it('stripe payment_intent.payment_failed webhook transitions payment to Failed',
     ));
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Failed);
+})->group('hardening');
+
+it('capture rejects a cancelled order', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Authorized, 10000);
+    $order->update(['status' => OrderStatus::Cancelled]);
+
+    expect(fn () => app(\EzEcommerce\Payments\Actions\CapturePayment::class)
+        ->executeForPayment($payment))
+        ->toThrow(RuntimeException::class);
+})->group('hardening');
+
+it('retry payment session rejects a cancelled order', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::RequiresAction, 10000);
+    $order->update(['status' => OrderStatus::Cancelled]);
+
+    expect(fn () => app(\EzEcommerce\Payments\Actions\RetryPaymentSession::class)
+        ->execute($payment, $order, 'retry-'.uniqid()))
+        ->toThrow(RuntimeException::class);
+})->group('hardening');
+
+it('dedupe-transactions recalculates payment aggregates after dedup', function () {
+    [$order, $payment] = createOrderWithPayment(PaymentStatus::Captured, 10000);
+
+    $externalId = 'cap_recalc_'.uniqid();
+
+    // Temporarily drop the unique constraint so we can insert a duplicate,
+    // simulating a pre-migration database state.
+    \Illuminate\Support\Facades\DB::statement(
+        'DROP INDEX IF EXISTS commerce_payment_transactions_external_unique',
+    );
+
+    PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 10000,
+        'currency' => 'AED',
+        'external_id' => $externalId,
+        'status' => 'succeeded',
+    ]);
+    PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 10000,
+        'currency' => 'AED',
+        'external_id' => $externalId,
+        'status' => 'succeeded',
+    ]);
+
+    // Corrupt the aggregate to simulate a pre-dedup double-count.
+    $payment->update(['captured_minor' => 20000]);
+
+    \Illuminate\Support\Facades\Artisan::call('commerce:dedupe-transactions');
+
+    $payment->refresh();
+    expect($payment->captured_minor)->toBe(10000)
+        ->and(PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('external_id', $externalId)
+            ->count())->toBe(1);
 })->group('hardening');

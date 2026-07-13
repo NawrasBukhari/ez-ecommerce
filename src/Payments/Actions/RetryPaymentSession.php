@@ -5,6 +5,7 @@ namespace EzEcommerce\Payments\Actions;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Models\Payment;
@@ -18,6 +19,7 @@ final class RetryPaymentSession
     public function __construct(
         private readonly PaymentGatewayRegistry $gateways,
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
+        private readonly PaymentOperationPolicy $paymentOperationPolicy,
     ) {
     }
 
@@ -27,6 +29,10 @@ final class RetryPaymentSession
 
         if (in_array($payment->status, [PaymentStatus::Captured, PaymentStatus::PartiallyCaptured], true)) {
             throw new RuntimeException('Payment is already captured.');
+        }
+
+        if (! $this->paymentOperationPolicy->canCreateSession($payment)) {
+            throw new RuntimeException('Order is cancelled or completed; cannot retry payment session.');
         }
 
         if ($idempotencyKey !== '') {

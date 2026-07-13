@@ -6,6 +6,7 @@ use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\CapturePaymentData;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
@@ -26,6 +27,7 @@ final class CapturePayment
         private readonly FinalizeAcceptedPayment $finalizeAcceptedPayment,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly RecordInventoryFinalizationFailure $recordInventoryFinalizationFailure,
+        private readonly PaymentOperationPolicy $paymentOperationPolicy,
     ) {
     }
 
@@ -66,6 +68,10 @@ final class CapturePayment
 
         $attempt = DB::transaction(function () use ($payment, $amount, $captureAmount, $idempotencyKey) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (! $this->paymentOperationPolicy->canCapture($locked)) {
+                throw new RuntimeException('Order is cancelled or completed, or payment is not in a capturable state.');
+            }
 
             $captureAmount = $amount ?? Money::fromMinor(
                 $locked->amount_minor - $locked->captured_minor,
@@ -140,6 +146,10 @@ final class CapturePayment
 
         ['payment' => $payment, 'amount' => $amount] = DB::transaction(function () use ($payment, $amount, $attempt) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (! $this->paymentOperationPolicy->canCapture($locked)) {
+                throw new RuntimeException('Order is cancelled or completed, or payment is not in a capturable state.');
+            }
 
             $captureAmount = $amount
                 ?? PaymentAttemptRequest::captureAmount($attempt, $locked)

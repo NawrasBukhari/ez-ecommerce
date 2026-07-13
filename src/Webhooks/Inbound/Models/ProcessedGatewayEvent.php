@@ -5,7 +5,12 @@ namespace EzEcommerce\Webhooks\Inbound\Models;
 use EzEcommerce\Core\Models\CommerceModel;
 
 /**
+ * @property string $gateway
+ * @property string $external_event_id
+ * @property string $event_type
  * @property string $status
+ * @property array $payload
+ * @property \Carbon\CarbonImmutable|null $processed_at
  */
 class ProcessedGatewayEvent extends CommerceModel
 {

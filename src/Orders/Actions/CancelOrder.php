@@ -5,12 +5,12 @@ namespace EzEcommerce\Orders\Actions;
 use EzEcommerce\Core\Enums\FulfillmentStatus;
 use EzEcommerce\Core\Enums\OrderPaymentStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
-use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\ReservationStatus;
 use EzEcommerce\Core\Enums\TransitionDimension;
 use EzEcommerce\Inventory\Actions\ReleaseInventoryReservation;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Actions\VoidPaymentAuthorization;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use Illuminate\Support\Facades\DB;
@@ -18,17 +18,12 @@ use RuntimeException;
 
 final class CancelOrder
 {
-    private const VOIDABLE_STATUSES = [
-        PaymentStatus::Authorized,
-        PaymentStatus::RequiresAction,
-        PaymentStatus::Pending,
-    ];
-
     public function __construct(
         private readonly RecordOrderTransition $recordOrderTransition,
         private readonly ReleaseInventoryReservation $releaseInventoryReservation,
         private readonly VoidPaymentAuthorization $voidPaymentAuthorization,
         private readonly PaymentGatewayRegistry $gateways,
+        private readonly PaymentOperationPolicy $paymentOperationPolicy,
     ) {
     }
 
@@ -47,7 +42,7 @@ final class CancelOrder
                 continue;
             }
 
-            if (! in_array($payment->status, self::VOIDABLE_STATUSES, true)) {
+            if (! $this->paymentOperationPolicy->canVoid($payment)) {
                 continue;
             }
 

@@ -3,6 +3,9 @@
 namespace EzEcommerce\Commands;
 
 use EzEcommerce\Core\Enums\PaymentTransactionType;
+use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Orders\Models\Order;
+use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -15,16 +18,16 @@ class DedupeTransactionsCommand extends Command
 
     protected $description = 'Remove duplicate payment transactions (or outbox keys) before the unique constraint is enforced';
 
-    public function handle(): int
+    public function handle(RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus): int
     {
         if ($this->option('outbox')) {
             return $this->dedupeOutbox();
         }
 
-        return $this->dedupeTransactions();
+        return $this->dedupeTransactions($recalculateOrderPaymentStatus);
     }
 
-    private function dedupeTransactions(): int
+    private function dedupeTransactions(RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus): int
     {
         $duplicates = PaymentTransaction::query()
             ->select('payment_id', 'type', 'external_id', DB::raw('MIN(id) as keep_id'), DB::raw('COUNT(*) as cnt'))
@@ -73,7 +76,48 @@ class DedupeTransactionsCommand extends Command
 
         $this->components->info("Deleted {$totalToDelete} duplicate payment transactions.");
 
+        // Recalculate payment aggregates and order payment projections for
+        // every payment that had duplicates removed — the surviving ledger
+        // rows are now the source of truth for captured/refunded totals.
+        $affectedPaymentIds = $duplicates->pluck('payment_id')->unique();
+        foreach ($affectedPaymentIds as $paymentId) {
+            $this->recalculatePaymentAggregates((int) $paymentId);
+            $payment = Payment::query()->find($paymentId);
+            if ($payment !== null && $payment->order !== null) {
+                $recalculateOrderPaymentStatus->execute($payment->order);
+            }
+        }
+
+        if ($affectedPaymentIds->isNotEmpty()) {
+            $this->components->info('Recalculated '.count($affectedPaymentIds).' payment(s) and their orders.');
+        }
+
         return self::SUCCESS;
+    }
+
+    private function recalculatePaymentAggregates(int $paymentId): void
+    {
+        $payment = Payment::query()->find($paymentId);
+        if ($payment === null) {
+            return;
+        }
+
+        $captured = (int) PaymentTransaction::query()
+            ->where('payment_id', $paymentId)
+            ->whereIn('type', [PaymentTransactionType::Capture, PaymentTransactionType::Authorization])
+            ->where('status', 'succeeded')
+            ->sum('amount_minor');
+
+        $refunded = (int) PaymentTransaction::query()
+            ->where('payment_id', $paymentId)
+            ->where('type', PaymentTransactionType::Refund)
+            ->where('status', 'succeeded')
+            ->sum('amount_minor');
+
+        $payment->update([
+            'captured_minor' => $captured,
+            'refunded_minor' => $refunded,
+        ]);
     }
 
     private function dedupeOutbox(): int

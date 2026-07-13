@@ -19,7 +19,6 @@ use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Models\Refund;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -239,21 +238,22 @@ final class RefundPayment
             : false;
 
         if (! $existingTransaction) {
-            try {
-                PaymentTransaction::query()->create([
-                    'payment_id' => $locked->id,
-                    'attempt_id' => $attempt->id,
-                    'type' => PaymentTransactionType::Refund,
-                    'amount_minor' => $result->amount->minorAmount,
-                    'currency' => $result->amount->currency,
-                    'external_id' => $result->externalId,
-                    'status' => 'succeeded',
-                    'processed_at' => $this->clock->now(),
-                    'metadata' => $result->metadata,
-                ]);
-            } catch (UniqueConstraintViolationException) {
-                // Concurrent webhook already recorded this refund transaction; re-sync from ledger.
-            }
+            // insertOrIgnore avoids PostgreSQL's transaction-poisoning on a
+            // unique violation; a concurrent webhook is silently skipped and
+            // the ledger resync below picks up the surviving row.
+            DB::table('commerce_payment_transactions')->insertOrIgnore([
+                'payment_id' => $locked->id,
+                'attempt_id' => $attempt->id,
+                'type' => PaymentTransactionType::Refund->value,
+                'amount_minor' => $result->amount->minorAmount,
+                'currency' => $result->amount->currency,
+                'external_id' => $result->externalId,
+                'status' => 'succeeded',
+                'processed_at' => $this->clock->now(),
+                'metadata' => json_encode($result->metadata, JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
 
         $refundedMinor = (int) PaymentTransaction::query()

@@ -9,7 +9,6 @@ use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -43,20 +42,20 @@ final class ReconcileVoidAttempt
                 ->exists();
 
             if (! $existingTransaction) {
-                try {
-                    PaymentTransaction::query()->create([
-                        'payment_id' => $locked->id,
-                        'attempt_id' => $attempt->id,
-                        'type' => PaymentTransactionType::Void,
-                        'amount_minor' => $locked->amount_minor,
-                        'currency' => $locked->currency,
-                        'external_id' => $externalId,
-                        'status' => 'succeeded',
-                        'processed_at' => $this->clock->now(),
-                    ]);
-                } catch (UniqueConstraintViolationException) {
-                    // Concurrent reconcile already recorded the void transaction.
-                }
+                // insertOrIgnore avoids PostgreSQL's transaction-poisoning on a
+                // unique violation; a concurrent reconcile is silently skipped.
+                DB::table('commerce_payment_transactions')->insertOrIgnore([
+                    'payment_id' => $locked->id,
+                    'attempt_id' => $attempt->id,
+                    'type' => PaymentTransactionType::Void->value,
+                    'amount_minor' => $locked->amount_minor,
+                    'currency' => $locked->currency,
+                    'external_id' => $externalId,
+                    'status' => 'succeeded',
+                    'processed_at' => $this->clock->now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
             }
 
             $locked->update(['status' => PaymentStatus::Cancelled]);

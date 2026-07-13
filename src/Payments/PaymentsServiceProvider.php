@@ -3,12 +3,14 @@
 namespace EzEcommerce\Payments;
 
 use EzEcommerce\Payments\Contracts\PaymentGateway;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Drivers\FakePaymentGateway;
 use EzEcommerce\Payments\Drivers\ManualPaymentGateway;
 use EzEcommerce\Payments\Drivers\NullPaymentGateway;
 use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
 use EzEcommerce\Payments\Drivers\StripePaymentGateway;
 use EzEcommerce\Payments\Drivers\TelrPaymentGateway;
+use EzEcommerce\Payments\Policies\DefaultPaymentOperationPolicy;
 use Illuminate\Support\ServiceProvider;
 
 class PaymentsServiceProvider extends ServiceProvider
@@ -22,6 +24,8 @@ class PaymentsServiceProvider extends ServiceProvider
         $this->app->singleton(PayPalPaymentGateway::class);
         $this->app->singleton(TelrPaymentGateway::class);
         $this->app->singleton(PaymentGatewayRegistry::class);
+
+        $this->app->singleton(PaymentOperationPolicy::class, DefaultPaymentOperationPolicy::class);
 
         $this->app->singleton(PaymentGateway::class, function ($app): PaymentGateway {
             $driver = config('ez-ecommerce.drivers.payment.default', 'manual');

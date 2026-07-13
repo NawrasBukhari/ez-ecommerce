@@ -7,13 +7,13 @@ use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Payments\Contracts\PaymentOperationPolicy;
 use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -25,21 +25,38 @@ final class VoidPaymentAuthorization
         private readonly ResolveProviderPaymentReference $providerReference,
         private readonly RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus,
         private readonly Clock $clock,
+        private readonly PaymentOperationPolicy $paymentOperationPolicy,
     ) {
     }
 
     public function execute(Payment $payment, string $idempotencyKey = ''): Payment
     {
-        $voidableStates = [
-            PaymentStatus::Authorized,
-            PaymentStatus::RequiresAction,
-            PaymentStatus::Pending,
-        ];
+        $payment->refresh();
 
-        $attempt = DB::transaction(function () use ($payment, $idempotencyKey, $voidableStates) {
+        if ($idempotencyKey !== '') {
+            $existing = PaymentAttempt::query()
+                ->where('payment_id', $payment->id)
+                ->where('idempotency_key', $idempotencyKey)
+                ->where('operation', 'void')
+                ->first();
+
+            if ($existing !== null) {
+                if ($existing->status === 'succeeded') {
+                    return $payment->fresh();
+                }
+
+                if (in_array($existing->status, ['pending', 'unknown'], true)) {
+                    throw new RuntimeException('Void with this idempotency key is in progress or requires reconciliation.');
+                }
+
+                // failed / failed_retryable → fall through and create a new attempt.
+            }
+        }
+
+        $attempt = DB::transaction(function () use ($payment, $idempotencyKey) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
-            if (! in_array($locked->status, $voidableStates, true)) {
+            if (! $this->paymentOperationPolicy->canVoid($locked)) {
                 throw new RuntimeException('Only authorized, pending, or requires-action payments can be voided.');
             }
 
@@ -114,21 +131,22 @@ final class VoidPaymentAuthorization
                 : false;
 
             if (! $existingTransaction) {
-                try {
-                    PaymentTransaction::query()->create([
-                        'payment_id' => $locked->id,
-                        'attempt_id' => $attempt->id,
-                        'type' => PaymentTransactionType::Void,
-                        'amount_minor' => $result->amount->minorAmount,
-                        'currency' => $result->amount->currency,
-                        'external_id' => $result->externalId,
-                        'status' => 'succeeded',
-                        'processed_at' => $this->clock->now(),
-                        'metadata' => $result->metadata,
-                    ]);
-                } catch (UniqueConstraintViolationException) {
-                    // Already voided by a concurrent request; continue idempotently.
-                }
+                // insertOrIgnore avoids PostgreSQL's transaction-poisoning on a
+                // unique violation; a concurrent void with the same external_id
+                // is silently skipped, which is the intended idempotent behavior.
+                DB::table('commerce_payment_transactions')->insertOrIgnore([
+                    'payment_id' => $locked->id,
+                    'attempt_id' => $attempt->id,
+                    'type' => PaymentTransactionType::Void->value,
+                    'amount_minor' => $result->amount->minorAmount,
+                    'currency' => $result->amount->currency,
+                    'external_id' => $result->externalId,
+                    'status' => 'succeeded',
+                    'processed_at' => $this->clock->now(),
+                    'metadata' => json_encode($result->metadata, JSON_THROW_ON_ERROR),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
             }
 
             $locked->update(['status' => PaymentStatus::Cancelled]);

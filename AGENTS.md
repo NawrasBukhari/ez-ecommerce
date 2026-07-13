@@ -24,6 +24,23 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 ## Sprint status (current)
 
+### Shipped (PSP lifecycle sprint 4)
+
+| Area | What landed |
+|------|-------------|
+| **Package installation** | `discoversMigrations()` + `runsMigrations()` + full `hasCommands([...])` in `EzEcommerceServiceProvider`; `PackageInstallationTest` guards the surface |
+| **Payment operation policy** | `PaymentOperationPolicy` contract + `DefaultPaymentOperationPolicy`; order-status guards in `CapturePayment`/`RetryPaymentSession`; replaces inline voidable-state lists in `VoidPaymentAuthorization`/`CancelOrder` |
+| **Stripe void states** | `void()` accepts all cancellable PI states (`requires_payment_method`, `requires_confirmation`, `requires_action`, `requires_capture`); already-cancelled is idempotent; `StripeVoidStatesTest` |
+| **Outbox worker** | `status` column on `commerce_outbox_messages`; `ProcessOutboxJob` + `commerce:process-outbox` command; `FinalizeAcceptedPayment` inserts `pending` row only (no inline dispatch); crash-recovery drains pending rows |
+| **Webhook replay** | `commerce:replay-webhooks` command; `unmatched` `ProcessedGatewayEvent` rows are replayable (not terminal) in `ReconcilePayment`/`ReconcileRefund` |
+| **PostgreSQL conflict safety** | `insertOrIgnore` replaces in-txn caught `UniqueConstraintViolationException` in `VoidPaymentAuthorization`, `ReconcileVoidAttempt`, `RefundPayment` |
+| **Stripe refund events** | `refund.created`/`updated`/`failed` parsed; local identifiers (`refund_public_id`, `payment_attempt_public_id`) attached to Stripe refund metadata; `ReconcileRefund` correlates by metadata |
+| **PayPal v2 capture** | `PAYMENT.CAPTURE.PENDING`/`DECLINED`/`REVERSED` parsed; `capture()` maps `PENDING` → `PaymentStatus::Pending`; `isFailureEvent` uses `DECLINED`/`REVERSED` (not `DENIED`) |
+| **Void idempotency replay** | `VoidPaymentAuthorization` looks up existing attempt by key; succeeded → idempotent return, pending/unknown → throw |
+| **Race tests** | `ConcurrencyRaceTest` + `tests/bin/worker.php` for two-process MySQL/PostgreSQL races (fulfillment, outbox, void); skipped on SQLite |
+| **Dedupe recalc** | `commerce:dedupe-transactions` recalculates `captured_minor`/`refunded_minor` and order payment projections after dedup |
+| **Tests** | 149 Pest tests across 16 feature files |
+
 ### Shipped (PSP lifecycle sprint 3)
 
 | Area | What landed |
@@ -90,8 +107,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 - Catalog update/delete API
 - Automated PSP payout transfers (payout records commissions as paid)
 - `currency.rounding` config (unused)
-- PayPal pending capture (`PAYMENT.CAPTURE.PENDING`) — async capture pending state not yet reconciled; Stripe/PayPal sandbox contract tests (deferred — need live credentials)
-- Real multi-process concurrency tests (deferred — need real DB + worker harness)
+- Real Stripe/PayPal/Telr sandbox contract tests (deferred — need live credentials)
 
 ---
 
@@ -225,6 +241,7 @@ Public checkout payment methods: `checkout.public_payment_methods` (default `['s
 | Contract | Default | Register in |
 |----------|---------|-------------|
 | `PaymentGateway` | Per `drivers.payment.default` | Host service provider |
+| `PaymentOperationPolicy` | `DefaultPaymentOperationPolicy` | `PaymentsServiceProvider` |
 | `PriceResolver` | `DefaultPriceResolver` | `PricingServiceProvider` |
 | `TaxCalculator` | `SimpleTaxCalculator` | `TaxesServiceProvider` (`drivers.tax.default`) |
 | `ShippingCalculator` | `FlatShippingCalculator` | `ShippingServiceProvider` (`drivers.shipping.default`) |

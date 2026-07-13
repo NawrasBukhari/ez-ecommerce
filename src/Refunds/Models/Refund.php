@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
+ * @property string $public_id
  * @property int $amount_minor
  * @property string $currency
  * @property RefundStatus $status

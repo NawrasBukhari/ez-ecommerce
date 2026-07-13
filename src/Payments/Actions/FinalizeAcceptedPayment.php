@@ -3,7 +3,7 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
-use EzEcommerce\Core\Events\OrderPaid;
+use EzEcommerce\Core\Jobs\ProcessOutboxJob;
 use EzEcommerce\Core\Models\OutboxMessage;
 use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
@@ -14,7 +14,6 @@ use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 
 final class FinalizeAcceptedPayment
 {
@@ -79,10 +78,13 @@ final class FinalizeAcceptedPayment
             // A crash after insert but before commit rolls the row back, so recovery re-dispatches.
             // The insert runs in its own savepoint so a unique violation on PostgreSQL doesn't
             // poison the surrounding transaction (PostgreSQL aborts the whole txn on any error).
+            // The outbox row is the source of truth: a separate worker drains it and dispatches
+            // the integration event, closing the crash window between durable state and delivery.
             try {
-                DB::transaction(fn () => OutboxMessage::query()->create([
+                $outboxMessage = DB::transaction(fn () => OutboxMessage::query()->create([
                     'event' => 'order.paid',
                     'key' => "order.paid:{$order->id}",
+                    'status' => 'pending',
                     'payload' => [
                         'order_id' => $order->id,
                         'order_public_id' => $order->public_id,
@@ -90,9 +92,9 @@ final class FinalizeAcceptedPayment
                     ],
                 ]));
 
-                Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
+                ProcessOutboxJob::dispatchSync($outboxMessage->id);
             } catch (UniqueConstraintViolationException) {
-                // Already dispatched by a concurrent finalizer or a prior recovery.
+                // Already enqueued by a concurrent finalizer or a prior recovery.
             }
 
             return;

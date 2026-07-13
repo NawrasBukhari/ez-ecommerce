@@ -41,27 +41,28 @@ final class ReconcilePayment
             ->where('external_event_id', $event->eventId)
             ->first();
 
-        if ($existing !== null && in_array($existing->status, ['processed', 'unmatched'], true)) {
+        if ($existing !== null && in_array($existing->status, ['processed'], true)) {
             return $event;
         }
 
         $isCapture = $this->isSuccessfulCaptureEvent($request->gateway, $event->eventType);
         $isAuthorization = $this->isAuthorizationEvent($request->gateway, $event->eventType);
         $isFailure = $this->isFailureEvent($request->gateway, $event->eventType);
+        $isPendingCapture = $this->isPendingCaptureEvent($request->gateway, $event->eventType);
 
-        if (! $isCapture && ! $isAuthorization && ! $isFailure) {
+        if (! $isCapture && ! $isAuthorization && ! $isFailure && ! $isPendingCapture) {
             return $event;
         }
 
         try {
-            DB::transaction(function () use ($request, $event, $isAuthorization, $isFailure) {
+            DB::transaction(function () use ($request, $event, $isAuthorization, $isFailure, $isPendingCapture) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
                     ->where('external_event_id', $event->eventId)
                     ->lockForUpdate()
                     ->first();
 
-                if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
+                if ($record !== null && in_array($record->status, ['processed'], true)) {
                     return;
                 }
 
@@ -87,6 +88,13 @@ final class ReconcilePayment
 
                 if ($isFailure) {
                     $this->applyFailureTransition($payment, $event);
+                    $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
+
+                    return;
+                }
+
+                if ($isPendingCapture) {
+                    $this->applyPendingCaptureTransition($payment, $event);
                     $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
 
                     return;
@@ -217,8 +225,8 @@ final class ReconcilePayment
                 'payment_intent.canceled',
             ], true),
             'paypal' => in_array($eventType, [
-                'PAYMENT.CAPTURE.DENIED',
-                'PAYMENT.CAPTURE.REFUNDED',
+                'PAYMENT.CAPTURE.DECLINED',
+                'PAYMENT.CAPTURE.REVERSED',
             ], true),
             'fake' => in_array($eventType, [
                 'payment_intent.payment_failed',
@@ -250,6 +258,38 @@ final class ReconcilePayment
         }
 
         $locked->update(['status' => PaymentStatus::Failed]);
+        $this->recalculateOrderPaymentStatus->execute($locked->order);
+    }
+
+    private function isPendingCaptureEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'paypal' => in_array($eventType, [
+                'PAYMENT.CAPTURE.PENDING',
+            ], true),
+            default => false,
+        };
+    }
+
+    private function applyPendingCaptureTransition(Payment $payment, GatewayWebhookEvent $event): void
+    {
+        $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+        // Pending is a pre-capture state; never regress a captured/terminal payment.
+        $terminal = [
+            PaymentStatus::Captured,
+            PaymentStatus::PartiallyCaptured,
+            PaymentStatus::Refunded,
+            PaymentStatus::PartiallyRefunded,
+            PaymentStatus::Cancelled,
+            PaymentStatus::Failed,
+        ];
+
+        if (in_array($locked->status, $terminal, true)) {
+            return;
+        }
+
+        $locked->update(['status' => PaymentStatus::Pending]);
         $this->recalculateOrderPaymentStatus->execute($locked->order);
     }
 

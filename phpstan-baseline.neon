@@ -283,6 +283,12 @@ parameters:
 			path: src/Core/Idempotency/IdempotencyStore.php
 
 		-
+			message: '#^Instanceof between ArrayObject and ArrayObject will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Core/Jobs/ProcessOutboxJob.php
+
+		-
 			message: '#^Access to an undefined property EzEcommerce\\Core\\Models\\CommerceModel\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
@@ -613,30 +619,6 @@ parameters:
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 4
-			path: src/Payments/Drivers/FakePaymentGateway.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 3
-			path: src/Payments/Drivers/ManualPaymentGateway.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Drivers/StripePaymentGateway.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Drivers/TelrPaymentGateway.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Pricing\\Models\\Price\:\:\$amount_minor\.$#'
 			identifier: property.notFound
 			count: 1
@@ -647,12 +629,6 @@ parameters:
 			identifier: property.notFound
 			count: 1
 			path: src/Pricing/DefaultPriceResolver.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Refunds\\Models\\Refund\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Refunds/Actions/RefundPayment.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$customer_id\.$#'

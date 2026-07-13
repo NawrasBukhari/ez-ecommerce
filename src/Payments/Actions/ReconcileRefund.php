@@ -29,7 +29,9 @@ final class ReconcileRefund
         return match ($gateway) {
             'stripe' => in_array($eventType, [
                 'charge.refunded',
+                'refund.created',
                 'refund.updated',
+                'refund.failed',
             ], true),
             'paypal' => in_array($eventType, [
                 'PAYMENT.CAPTURE.REFUNDED',
@@ -55,7 +57,7 @@ final class ReconcileRefund
             ->where('external_event_id', $event->eventId)
             ->first();
 
-        if ($existing !== null && in_array($existing->status, ['processed', 'unmatched'], true)) {
+        if ($existing !== null && in_array($existing->status, ['processed'], true)) {
             return $event;
         }
 
@@ -69,7 +71,7 @@ final class ReconcileRefund
                     ->lockForUpdate()
                     ->first();
 
-                if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
+                if ($record !== null && in_array($record->status, ['processed'], true)) {
                     return;
                 }
 
@@ -173,6 +175,36 @@ final class ReconcileRefund
 
     private function findRefundAttempt(GatewayWebhookEvent $event): ?PaymentAttempt
     {
+        // Refund-object events (Stripe refund.created/updated/failed) carry local
+        // identifiers in metadata; prefer those for precise per-refund correlation.
+        $metadata = $event->metadata;
+        if (! empty($metadata)) {
+            $refundPublicId = $metadata['refund_public_id'] ?? null;
+            if (is_string($refundPublicId) && $refundPublicId !== '') {
+                $refund = Refund::query()->where('public_id', $refundPublicId)->first();
+                if ($refund !== null) {
+                    $attempt = PaymentAttempt::query()
+                        ->where('operation', 'refund')
+                        ->where('external_id', $event->transactionReference)
+                        ->first();
+                    if ($attempt !== null) {
+                        return $attempt;
+                    }
+                }
+            }
+
+            $attemptPublicId = $metadata['payment_attempt_public_id'] ?? null;
+            if (is_string($attemptPublicId) && $attemptPublicId !== '') {
+                $attempt = PaymentAttempt::query()
+                    ->where('public_id', $attemptPublicId)
+                    ->where('operation', 'refund')
+                    ->first();
+                if ($attempt !== null) {
+                    return $attempt;
+                }
+            }
+        }
+
         foreach ([$event->transactionReference, $event->paymentReference] as $reference) {
             if (! is_string($reference) || $reference === '') {
                 continue;

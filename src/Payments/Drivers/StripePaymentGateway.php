@@ -113,8 +113,28 @@ final class StripePaymentGateway implements PaymentGateway
 
         $intent = $this->client->paymentIntents->retrieve($intentId);
 
-        if ($intent->status !== 'requires_capture') {
-            throw PaymentOperationNotSupported::for('stripe', 'void on non-capturable intent');
+        // Stripe permits cancellation in every pre-capture state. See
+        // https://docs.stripe.com/api/payment_intents/cancel
+        $cancellable = [
+            'requires_payment_method',
+            'requires_confirmation',
+            'requires_action',
+            'requires_capture',
+        ];
+
+        if ($intent->status === 'canceled') {
+            // Already cancelled at Stripe — idempotent success.
+            return new PaymentResult(
+                success: true,
+                status: PaymentStatus::Cancelled,
+                amount: $data->amount,
+                externalId: $intent->id,
+                metadata: ['stripe_payment_intent_id' => $intent->id],
+            );
+        }
+
+        if (! in_array($intent->status, $cancellable, true)) {
+            throw PaymentOperationNotSupported::for('stripe', "void on non-cancellable intent status [{$intent->status}]");
         }
 
         $cancelled = $this->client->paymentIntents->cancel(
@@ -154,6 +174,15 @@ final class StripePaymentGateway implements PaymentGateway
             ? ['charge' => $captureTransaction, 'amount' => $data->amount->minorAmount]
             : ['payment_intent' => $intentId, 'amount' => $data->amount->minorAmount];
 
+        // Attach local identifiers so refund-object webhooks (refund.created/updated/failed)
+        // can be correlated back to the local refund, attempt, payment, and order.
+        $refundParams['metadata'] = array_merge($data->metadata, [
+            'refund_public_id' => $data->refund->public_id,
+            'payment_attempt_public_id' => $data->attempt->public_id,
+            'payment_public_id' => $data->payment->public_id,
+            'order_public_id' => $data->payment->order?->public_id,
+        ]);
+
         $refund = $this->client->refunds->create(
             $refundParams,
             $this->idempotencyOptions($data->attempt->idempotency_key, "refund:{$data->attempt->id}"),
@@ -179,13 +208,13 @@ final class StripePaymentGateway implements PaymentGateway
 
         $paymentReference = match ($type) {
             'charge.captured' => $object['payment_intent'] ?? null,
-            'charge.refunded', 'refund.updated' => $object['payment_intent'] ?? $object['id'] ?? null,
+            'charge.refunded', 'refund.updated', 'refund.created', 'refund.failed' => $object['payment_intent'] ?? $object['id'] ?? null,
             default => $object['id'] ?? null,
         };
 
         $transactionReference = match ($type) {
             'charge.captured' => $object['id'] ?? null,
-            'charge.refunded', 'refund.updated' => $object['id'] ?? null,
+            'charge.refunded', 'refund.updated', 'refund.created', 'refund.failed' => $object['id'] ?? null,
             default => $object['latest_charge'] ?? $object['id'] ?? null,
         };
 
@@ -197,11 +226,19 @@ final class StripePaymentGateway implements PaymentGateway
             'charge.refunded' => isset($object['amount'])
                 ? (int) $object['amount']
                 : (isset($object['amount_refunded']) ? (int) $object['amount_refunded'] : null),
-            'refund.updated' => isset($object['amount']) ? (int) $object['amount'] : null,
+            'refund.updated', 'refund.created', 'refund.failed' => isset($object['amount']) ? (int) $object['amount'] : null,
             default => isset($object['amount']) ? (int) $object['amount'] : null,
         };
 
         $providerStatus = is_string($object['status'] ?? null) ? (string) $object['status'] : null;
+
+        // Refund-object events carry local identifiers in metadata; surface them so the
+        // reconciler can correlate by refund_public_id or payment_attempt_public_id.
+        $metadata = null;
+        if (in_array($type, ['refund.created', 'refund.updated', 'refund.failed'], true)
+            && isset($object['metadata']) && is_array($object['metadata'])) {
+            $metadata = $object['metadata'];
+        }
 
         return new GatewayWebhookEvent(
             eventType: $type,
@@ -211,6 +248,7 @@ final class StripePaymentGateway implements PaymentGateway
             amountMinor: $amountMinor,
             currency: isset($object['currency']) ? strtoupper((string) $object['currency']) : null,
             providerStatus: $providerStatus,
+            metadata: $metadata,
         );
     }
 

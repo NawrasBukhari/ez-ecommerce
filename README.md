@@ -335,10 +335,8 @@ The honest "please don't `@` me on GitHub about this" list:
 - **Catalog update/delete API** — create + read only.
 - **Automated bank/PSP payouts** — payout API records commissions as paid; no bank transfers
 - **Real PSP sandbox contract tests** — Stripe/PayPal/Telr live paths not in CI
-- **Multi-process concurrency tests** — cart `version` bumps are atomic; true multi-process CI still open
 - **`currency.rounding` config** — defined, unused. Schrödinger's setting.
 - **PayPal `CHECKOUT.ORDER.APPROVED`** — no server-side capture trigger yet
-- **PayPal pending capture** — `PAYMENT.CAPTURE.PENDING` async capture pending state not reconciled
 
 `OrderManager::fulfill()` is **not** on the `EzEcommerce` facade — use DI or the API. We hid fulfill on purpose so you wouldn't one-line your way into shipping unpaid orders. You're welcome. Again.
 
@@ -587,6 +585,10 @@ php artisan commerce:purge-idempotency-records
 php artisan commerce:reconcile-payments --list
 php artisan commerce:reconcile-refunds --list
 php artisan commerce:reconcile-finalizations --list
+php artisan commerce:reconcile-voids --list
+php artisan commerce:dedupe-transactions --dry-run
+php artisan commerce:process-outbox
+php artisan commerce:replay-webhooks --unmatched
 ```
 
 Recommended scheduler in the host app:
@@ -612,6 +614,7 @@ Swap contracts, don't fork the universe. If you're copy-pasting `PlaceOrder`, yo
 | `TaxCalculator` | `SimpleTaxCalculator` (or `JurisdictionTaxCalculator`) |
 | `ShippingCalculator` | `FlatShippingCalculator` / `WeightShippingCalculator` |
 | `PaymentGateway` | Per `drivers.payment.default` |
+| `PaymentOperationPolicy` | `DefaultPaymentOperationPolicy` |
 | `CustomerResolver` | `DefaultCustomerResolver` |
 | `ReservationPolicy` | `ConfigReservationPolicy` |
 | `FulfillmentReleasePolicy` | `DefaultFulfillmentReleasePolicy` |
@@ -642,7 +645,7 @@ Outbound webhooks example:
 
 | Result | What to do |
 |--------|------------|
-| All 102 green | You're ready to go. Ship it. Tell nobody you only ran the tests once. |
+| All green | You're ready to go. Ship it. Tell nobody you only ran the tests once. |
 | One red | Panic. Then fix it. Then panic again because you almost shipped. |
 | All red | Close the laptop. The engine is telling you something. Probably "sleep." |
 | PHPStan green, Pest red | Your types are lying. Trust the tests. |
@@ -665,9 +668,9 @@ vendor/bin/phpstan analyse --memory-limit=512M
 
 Package dev uses `testbench.yaml` so PHPStan boots without Orchestra Canvas conflicts. PHPStan and Canvas have… history.
 
-### Test suite (102 tests, 13 files)
+### Test suite (149 tests, 16 files)
 
-*102 tests can't prove your checkout works in prod, but 102 failures can prove it doesn't work in CI. Start there.*
+*149 tests can't prove your checkout works in prod, but 149 failures can prove it doesn't work in CI. Start there.*
 
 CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=hardening`).
 
@@ -676,11 +679,16 @@ CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=harde
 | `CommerceFlowTest` | Boot, cart→checkout, idempotency, money |
 | `HardeningTest` | Manual capture, fulfill, refund, OOS |
 | `CorrectnessHardeningTest` | Unknown captures/refunds, `OrderPaid`, reconciliation |
+| `PaymentLifecycleHardeningTest` | Capture/refund lifecycle, `OrderPaid` outbox exactly-once |
+| `PspLifecycleSprint3Test` | PSP sprint 3: partial capture, monotonic auth, void replay, outbox, failure webhooks |
+| `PackageInstallationTest` | Migration auto-load via `runsMigrations`, command registration |
+| `StripeVoidStatesTest` | Stripe void across all cancellable PaymentIntent states |
+| `ConcurrencyRaceTest` | Two-process MySQL/PostgreSQL race tests (fulfillment, outbox, void) |
 | `ApiTest` / `ApiExtendedTest` | REST surface, token auth, capture/fulfill |
 | `SecurityTest` | Fail-closed API, scopes, webhook auth |
 | `SprintApiTest` | Customers, cart merge, retry payment, returns |
 | `BacklogApiTest` / `BacklogImplementationTest` | Admin APIs, categories, webhooks, cart expiry |
-| `SchemaAndRelationsTest` | Migrations (50), FK integrity |
+| `SchemaAndRelationsTest` | Migrations (51), FK integrity |
 | `ModulesTest` / `ModulesExtendedTest` | Discounts, subscriptions, marketplace, outbox |
 | `TaxCalculationTest` | Tax-after-discount, shipping in tax base |
 
@@ -689,11 +697,10 @@ CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=harde
 ## Roadmap
 
 1. Real Stripe/PayPal/Telr contract tests (sandbox)
-2. Multi-process concurrent race tests in CI
-3. Catalog update/delete API
-4. PayPal `CHECKOUT.ORDER.APPROVED` → server-side capture trigger
-5. PayPal pending capture (`PAYMENT.CAPTURE.PENDING`) reconciliation
-5. PayPal `PAYMENT.CAPTURE.PENDING` reconciliation (async capture pending state)
+2. Catalog update/delete API
+3. PayPal `CHECKOUT.ORDER.APPROVED` → server-side capture trigger
+4. Automated PSP payout transfers (bank transfers, not just ledger records)
+5. `currency.rounding` config (currently unused)
 
 See [`AGENTS.md`](AGENTS.md) for implementation constraints.
 

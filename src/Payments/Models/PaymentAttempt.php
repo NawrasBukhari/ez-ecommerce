@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
+ * @property string $public_id
  * @property int $payment_id
  * @property string $operation
  * @property string|null $idempotency_key

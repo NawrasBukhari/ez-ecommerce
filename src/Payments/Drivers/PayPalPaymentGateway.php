@@ -8,6 +8,7 @@ use EzEcommerce\Payments\Contracts\PaymentGateway;
 use EzEcommerce\Payments\Data\CapturePaymentData;
 use EzEcommerce\Payments\Data\CreatePaymentSessionData;
 use EzEcommerce\Payments\Data\GatewayWebhookEvent;
+use EzEcommerce\Payments\Data\PaymentFailure;
 use EzEcommerce\Payments\Data\PaymentGatewayCapabilities;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
@@ -97,12 +98,30 @@ final class PayPalPaymentGateway implements PaymentGateway
 
         $body = $response->json();
         $captureId = $body['purchase_units'][0]['payments']['captures'][0]['id'] ?? $orderId;
+        $bodyStatus = (string) ($body['status'] ?? '');
+
+        // PayPal v2 capture responses: COMPLETED (settled), PENDING (accepted but
+        // settling), or a failure status. PENDING is a legitimate accepted state —
+        // the money will settle asynchronously, so treat it as success with Pending.
+        $success = in_array($bodyStatus, ['COMPLETED', 'PENDING'], true);
+        $paymentStatus = match ($bodyStatus) {
+            'COMPLETED' => PaymentStatus::Captured,
+            'PENDING' => PaymentStatus::Pending,
+            default => PaymentStatus::Failed,
+        };
+
+        $failure = $success ? null : new PaymentFailure(
+            code: 'paypal_capture_'.$this->snakeStatus($bodyStatus),
+            message: "PayPal capture returned status [{$bodyStatus}].",
+            retryable: false,
+        );
 
         return new PaymentResult(
-            success: ($body['status'] ?? '') === 'COMPLETED',
-            status: PaymentStatus::Captured,
+            success: $success,
+            status: $paymentStatus,
             amount: $data->amount,
             externalId: $captureId,
+            failure: $failure,
         );
     }
 
@@ -168,6 +187,10 @@ final class PayPalPaymentGateway implements PaymentGateway
             // is the refund object, so resource.id is the refund id we correlated against.
             $transactionReference = $resource['id'] ?? null;
             $providerStatus = is_string($resource['status'] ?? null) ? (string) $resource['status'] : null;
+        } elseif (in_array($eventType, ['PAYMENT.CAPTURE.PENDING', 'PAYMENT.CAPTURE.DECLINED', 'PAYMENT.CAPTURE.REVERSED'], true)) {
+            // PayPal v2 capture lifecycle: pending (async settlement), declined, reversed.
+            $transactionReference = $resource['id'] ?? null;
+            $providerStatus = is_string($resource['status'] ?? null) ? (string) $resource['status'] : null;
         }
 
         $amountMinor = null;
@@ -228,5 +251,10 @@ final class PayPalPaymentGateway implements PaymentGateway
     private function requestIdHeaders(?string $key, string $fallback): array
     {
         return ['PayPal-Request-Id' => $key !== null && $key !== '' ? $key : $fallback];
+    }
+
+    private function snakeStatus(string $status): string
+    {
+        return strtolower(preg_replace('/([A-Z])/', '_$1', $status) ?? $status);
     }
 }
