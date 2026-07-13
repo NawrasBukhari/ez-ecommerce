@@ -8,9 +8,9 @@ use EzEcommerce\Core\Enums\RefundStatus;
  * Enforces monotonic refund status transitions.
  *
  * Succeeded is terminal: a late pending or failed webhook must never regress a
- * refund that already succeeded. Failed → Succeeded is permitted only as an
- * explicit reconciliation (operator/provider confirmation), never an automatic
- * regression the other way.
+ * refund that already succeeded. Failed is terminal except via explicit
+ * reconciliation (Failed → Succeeded when the provider proves success). A
+ * delayed pending webhook must not regress a Failed refund back to Pending.
  */
 final class RefundTransitionPolicy
 {
@@ -27,6 +27,13 @@ final class RefundTransitionPolicy
             return false;
         }
 
+        // Failed is terminal except via explicit reconciliation to Succeeded
+        // (handled above). A delayed pending webhook must not regress Failed.
+        if ($from === RefundStatus::Failed && $to === RefundStatus::Pending) {
+            return false;
+        }
+
+        // Pending → Failed is a normal decline; Pending → Pending is a no-op.
         return true;
     }
 }

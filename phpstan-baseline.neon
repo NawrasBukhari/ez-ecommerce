@@ -229,12 +229,6 @@ parameters:
 			path: src/Commands/DedupeTransactionsCommand.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$keep_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Commands/DedupeTransactionsCommand.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$payment_id\.$#'
 			identifier: property.notFound
 			count: 2

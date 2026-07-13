@@ -89,8 +89,36 @@ final class ReconcilePayment
                 }
 
                 // Reversal has precedence over failure/pending: a provider clawback
-                // is a first-class ledger event, not a generic capture failure.
+                // is a first-class ledger event, not a generic capture failure. But
+                // a reversal arriving before the capture completion cannot be
+                // applied (no captured ledger to reverse) — defer it so a later
+                // completion webhook can replay it. Marking it `processed` would
+                // permanently lose the reversal under out-of-order delivery.
                 if ($isReversal) {
+                    $capturedMinor = $this->sumCaptured($payment);
+                    if ($capturedMinor <= 0 && ! in_array($payment->status, [
+                        PaymentStatus::Captured,
+                        PaymentStatus::PartiallyCaptured,
+                        PaymentStatus::Reversed,
+                    ], true)) {
+                        $record->update([
+                            'status' => 'deferred',
+                            'payload' => array_merge(
+                                (array) ($record->payload ?? []),
+                                [
+                                    'payment_reference' => $event->paymentReference,
+                                    'transaction_reference' => $event->transactionReference ?? $event->paymentReference,
+                                    'amount_minor' => $event->amountMinor ?? $payment->captured_minor,
+                                    'currency' => $event->currency ?? $payment->currency,
+                                    'provider_status' => $event->providerStatus,
+                                    'metadata' => $event->metadata,
+                                ],
+                            ),
+                        ]);
+
+                        return;
+                    }
+
                     $this->applyReversal($payment, $event);
                     $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
 
@@ -143,9 +171,13 @@ final class ReconcilePayment
                     return;
                 }
 
+                // Resolve the original pending capture attempt using the provider
+                // reference so it does not stay pending forever after completion.
+                $captureAttempt = $this->findPendingCaptureAttempt($payment, $transactionReference);
+
                 $payment = $this->applyPaymentCapture->execute(
                     $payment,
-                    null,
+                    $captureAttempt,
                     $amountMinor,
                     $event->currency ?? $payment->currency,
                     $transactionReference,
@@ -172,6 +204,10 @@ final class ReconcilePayment
                     'processed_at' => $this->clock->now(),
                     'last_error' => null,
                 ]);
+
+                // After a successful capture completion, replay any deferred
+                // reversal webhook that arrived before the capture existed.
+                $this->replayDeferredReversals($request->gateway, $payment, $record);
             });
         } catch (UniqueConstraintViolationException) {
             $record = ProcessedGatewayEvent::query()
@@ -179,7 +215,7 @@ final class ReconcilePayment
                 ->where('external_event_id', $event->eventId)
                 ->first();
 
-            if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
+            if ($record !== null && in_array($record->status, ['processed', 'unmatched', 'deferred'], true)) {
                 return $event;
             }
 
@@ -402,5 +438,100 @@ final class ReconcilePayment
         $this->recalculateOrderPaymentStatus->execute($locked->order);
 
         return $locked->fresh();
+    }
+
+    private function sumCaptured(Payment $payment): int
+    {
+        return (int) PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('type', PaymentTransactionType::Capture)
+            ->where('status', 'succeeded')
+            ->sum('amount_minor');
+    }
+
+    /**
+     * Find the original pending capture attempt by provider reference so a
+     * completion webhook can resolve it to succeeded instead of leaving it
+     * pending forever.
+     */
+    private function findPendingCaptureAttempt(Payment $payment, ?string $reference): ?PaymentAttempt
+    {
+        if ($reference === null) {
+            return null;
+        }
+
+        return PaymentAttempt::query()
+            ->where('payment_id', $payment->id)
+            ->where('operation', 'capture')
+            ->where('status', 'pending')
+            ->where(function ($query) use ($reference) {
+                $query->where('external_id', $reference)
+                    ->orWhereNull('external_id');
+            })
+            ->orderBy('external_id', 'desc')
+            ->first();
+    }
+
+    /**
+     * After a capture completion, find deferred reversal inbox records for this
+     * gateway and payment and replay them. Each replay applies the reversal to
+     * the now-captured payment and marks the inbox record processed.
+     */
+    private function replayDeferredReversals(string $gateway, Payment $payment, ProcessedGatewayEvent $currentRecord): void
+    {
+        $deferred = ProcessedGatewayEvent::query()
+            ->where('gateway', $gateway)
+            ->where('status', 'deferred')
+            ->where('id', '!=', $currentRecord->id)
+            ->get()
+            ->filter(fn (ProcessedGatewayEvent $record) => $this->findPaymentFromPayload($record) === $payment->id);
+
+        foreach ($deferred as $record) {
+            $payload = (array) ($record->payload ?? []);
+
+            $event = new GatewayWebhookEvent(
+                eventType: $record->event_type,
+                eventId: $record->external_event_id,
+                paymentReference: $payload['payment_reference'] ?? $payment->public_id,
+                transactionReference: $payload['transaction_reference'] ?? null,
+                amountMinor: $payload['amount_minor'] ?? $payment->captured_minor,
+                currency: $payload['currency'] ?? $payment->currency,
+                providerStatus: $payload['provider_status'] ?? null,
+                metadata: $payload['metadata'] ?? [],
+            );
+
+            $this->applyReversal($payment, $event);
+            $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
+        }
+    }
+
+    /**
+     * Resolve the payment id from a stored webhook payload, matching the same
+     * lookup logic as findPayment but returning an id for cheap comparison.
+     */
+    private function findPaymentFromPayload(ProcessedGatewayEvent $record): ?int
+    {
+        $payload = (array) ($record->payload ?? []);
+
+        $reference = $payload['payment_reference'] ?? null;
+        if (! is_string($reference) || $reference === '') {
+            return null;
+        }
+
+        $attempt = PaymentAttempt::query()->where('external_id', $reference)->first();
+        if ($attempt !== null) {
+            return $attempt->payment_id;
+        }
+
+        $payment = Payment::query()->where('public_id', $reference)->first();
+        if ($payment !== null) {
+            return $payment->id;
+        }
+
+        $payment = Payment::query()
+            ->whereHas('order', fn ($query) => $query->where('public_id', $reference))
+            ->first();
+
+        return $payment?->id;
     }
 }

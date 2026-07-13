@@ -3,10 +3,12 @@
 namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
+use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
+use EzEcommerce\Payments\Models\PaymentTransaction;
 
 /**
  * Centralizes capture-result interpretation so the gateway PaymentStatus
@@ -122,11 +124,35 @@ final class HandleCaptureResult
             'error_message' => $result->failure?->message,
         ]);
 
-        // Derive the aggregate from the existing successful ledger only; a failed
-        // follow-up capture must not overwrite a previously partially captured
-        // payment as entirely failed. Payment status is left to be derived from the
-        // ledger by recalculation / webhook reconciliation, never forced to Failed
-        // here when prior captures exist.
+        // Derive the aggregate from the existing successful ledger: a failed
+        // follow-up capture must not overwrite a prior partial capture. But a
+        // terminal decline with zero captured funds must move the payment to
+        // Failed — otherwise an authorized payment whose only capture attempt
+        // declined stays Authorized forever. RecalculateOrderPaymentStatus only
+        // reads the payment status column, so we must set it here from the ledger
+        // before the order recalc.
+        $captured = (int) PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('type', PaymentTransactionType::Capture)
+            ->where('status', 'succeeded')
+            ->sum('amount_minor');
+
+        if ($captured === 0 && $result->status === PaymentStatus::Failed) {
+            // Only a terminal Failed (not pending/unknown) with no prior captures
+            // is a definitive decline. Don't regress terminal states.
+            $terminal = [
+                PaymentStatus::Captured,
+                PaymentStatus::PartiallyCaptured,
+                PaymentStatus::Refunded,
+                PaymentStatus::PartiallyRefunded,
+                PaymentStatus::Cancelled,
+                PaymentStatus::Reversed,
+            ];
+            if (! in_array($payment->status, $terminal, true)) {
+                $payment->update(['status' => PaymentStatus::Failed]);
+            }
+        }
+
         $this->recalculateOrderPaymentStatus->execute($payment->order);
 
         return $payment->fresh();

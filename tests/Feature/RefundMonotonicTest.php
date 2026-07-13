@@ -169,6 +169,22 @@ it('demotes stripe charge.refunded to an informational event that does not apply
         ->and(app(ReconcileRefund::class)->isRefundEvent('stripe', 'refund.updated'))->toBeTrue();
 })->group('hardening');
 
+it('does not regress a failed refund to pending on a delayed pending webhook', function () {
+    [$order, $payment, $refund, $attempt, $externalId] = createRefundFixture(RefundStatus::Failed, 'failed');
+
+    $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
+        webhookEvent: refundWebhook($payment, $externalId, 'pending'),
+    ));
+
+    app(ReconcileRefund::class)->execute(new WebhookRequestData(
+        gateway: 'fake',
+        payload: '{"type":"refund.updated"}',
+    ));
+
+    expect($refund->fresh()->status)->toBe(RefundStatus::Failed)
+        ->and($attempt->fresh()->status)->toBe('failed');
+})->group('hardening');
+
 function createPaymentForRefundPolicy(PaymentStatus $paymentStatus, ?OrderStatus $orderStatus = null, int $capturedMinor = 0, int $refundedMinor = 0): array
 {
     $customer = Customer::query()->create([

@@ -121,8 +121,16 @@ final class FinalizeAcceptedPayment
 
         if ($outboxId !== null) {
             // Schedule delivery after the transaction commits. Failure to enqueue
-            // is non-fatal: commerce:process-outbox drains pending rows.
-            DB::afterCommit(fn () => ProcessOutboxJob::dispatch($outboxId));
+            // is non-fatal: commerce:process-outbox drains pending rows. A queue
+            // outage must not be classified as financial or inventory uncertainty.
+            DB::afterCommit(function () use ($outboxId) {
+                try {
+                    ProcessOutboxJob::dispatch($outboxId);
+                } catch (\Throwable) {
+                    // The outbox row is already committed; the polling command
+                    // will pick it up. Swallow the enqueue failure silently.
+                }
+            });
         }
     }
 }

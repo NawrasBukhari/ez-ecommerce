@@ -5,6 +5,7 @@ namespace EzEcommerce\Commands;
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Enums\PaymentTransactionType;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
+use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use Illuminate\Console\Command;
@@ -31,11 +32,23 @@ class DedupeTransactionsCommand extends Command
     private function dedupeTransactions(RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus): int
     {
         $paymentFilter = $this->option('payment');
+        $dryRun = (bool) $this->option('dry-run');
 
         // PostgreSQL does not allow HAVING to reference a select alias, so use
         // havingRaw with the aggregate directly. Both engines accept this form.
+        // Canonical row preference: succeeded status first, then earliest
+        // processed_at, then lowest id — so a later successful transaction
+        // survives over an earlier failed one with the same external reference.
         $query = PaymentTransaction::query()
-            ->select('payment_id', 'type', 'external_id', DB::raw('MIN(id) as keep_id'), DB::raw('COUNT(*) as cnt'))
+            ->select(
+                'payment_id',
+                'type',
+                'external_id',
+                DB::raw('MIN(CASE WHEN status = \'succeeded\' THEN 0 ELSE 1 END) as status_rank'),
+                DB::raw('MIN(CASE WHEN status = \'succeeded\' THEN processed_at ELSE NULL END) as earliest_success'),
+                DB::raw('MIN(id) as min_id'),
+                DB::raw('COUNT(*) as cnt'),
+            )
             ->whereNotNull('external_id')
             ->groupBy('payment_id', 'type', 'external_id')
             ->havingRaw('COUNT(*) > 1');
@@ -50,7 +63,8 @@ class DedupeTransactionsCommand extends Command
             $this->components->info('No duplicate payment transactions found.');
 
             // Even with no duplicates, --payment may request an aggregate rebuild.
-            if ($paymentFilter !== null) {
+            // But a dry-run must never write — skip the rebuild in dry-run mode.
+            if ($paymentFilter !== null && ! $dryRun) {
                 $this->recalculatePaymentAggregates((int) $paymentFilter, $recalculateOrderPaymentStatus);
             }
 
@@ -60,20 +74,18 @@ class DedupeTransactionsCommand extends Command
         $totalToDelete = 0;
         foreach ($duplicates as $dup) {
             $totalToDelete += (int) $dup->getAttribute('cnt') - 1;
-            $dup->setAttribute('keep_id', (int) $dup->getAttribute('keep_id'));
         }
 
         $this->components->warn("Found {$duplicates->count()} duplicate groups ({$totalToDelete} extra rows).");
 
-        if ($this->option('dry-run')) {
+        if ($dryRun) {
             $this->table(
-                ['payment_id', 'type', 'external_id', 'duplicates', 'keep_id'],
+                ['payment_id', 'type', 'external_id', 'duplicates'],
                 $duplicates->map(fn ($dup) => [
                     $dup->payment_id,
                     $dup->type instanceof PaymentTransactionType ? $dup->type->value : (string) $dup->type,
                     $dup->external_id,
                     $dup->cnt - 1,
-                    $dup->keep_id,
                 ]),
             );
 
@@ -81,11 +93,16 @@ class DedupeTransactionsCommand extends Command
         }
 
         foreach ($duplicates as $dup) {
+            // Canonical selection: prefer succeeded, then earliest success date,
+            // then lowest id. This preserves financial evidence over a failed
+            // duplicate with the same external reference.
+            $keepId = $this->canonicalId($dup);
+
             PaymentTransaction::query()
                 ->where('payment_id', $dup->payment_id)
                 ->where('type', $dup->type)
                 ->where('external_id', $dup->external_id)
-                ->where('id', '!=', $dup->keep_id)
+                ->where('id', '!=', $keepId)
                 ->delete();
         }
 
@@ -99,6 +116,31 @@ class DedupeTransactionsCommand extends Command
         $this->components->info('Recalculated '.count($affectedPaymentIds).' payment(s) and their orders.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Determine the canonical row id to keep: prefer a succeeded transaction,
+     * then the earliest succeeded processed_at, then the lowest id.
+     */
+    private function canonicalId($dup): int
+    {
+        // If any succeeded transaction exists, keep the earliest succeeded one.
+        if ((int) $dup->getAttribute('status_rank') === 0) {
+            $succeeded = PaymentTransaction::query()
+                ->where('payment_id', $dup->payment_id)
+                ->where('type', $dup->type)
+                ->where('external_id', $dup->external_id)
+                ->where('status', 'succeeded')
+                ->orderBy('processed_at')
+                ->orderBy('id')
+                ->first();
+
+            if ($succeeded !== null) {
+                return $succeeded->id;
+            }
+        }
+
+        return (int) $dup->getAttribute('min_id');
     }
 
     private function recalculatePaymentAggregates(int $paymentId, RecalculateOrderPaymentStatus $recalculateOrderPaymentStatus): void
@@ -145,8 +187,16 @@ class DedupeTransactionsCommand extends Command
                 'status' => $status,
             ]);
 
-            if ($payment->order !== null) {
-                $recalculateOrderPaymentStatus->execute($payment->order);
+            // Rebuild the order's refunded_total_minor from the payment ledger
+            // so the order payment projection is consistent after dedupe.
+            $order = $payment->order;
+            if ($order !== null) {
+                $orderRefundedTotal = (int) Payment::query()
+                    ->where('order_id', $order->id)
+                    ->sum('refunded_minor');
+
+                $order->update(['refunded_total_minor' => $orderRefundedTotal]);
+                $recalculateOrderPaymentStatus->execute($order);
             }
         });
     }
@@ -159,7 +209,10 @@ class DedupeTransactionsCommand extends Command
         if ($reversed > 0) {
             return PaymentStatus::Reversed;
         }
-        if ($refunded >= $payment->amount_minor && $refunded > 0) {
+        // Fully refunded is relative to captured funds, not the original amount:
+        // a partial capture of 4000 fully refunded (4000) is Refunded, not
+        // PartiallyRefunded.
+        if ($captured > 0 && $refunded >= $captured) {
             return PaymentStatus::Refunded;
         }
         if ($refunded > 0) {

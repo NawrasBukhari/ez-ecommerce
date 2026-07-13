@@ -83,6 +83,17 @@ final class VoidPaymentAuthorization
 
             $this->assertNoConflictingPaymentOperation->execute($locked, 'void');
 
+            // Same-operation guard: a second void with a different key must not
+            // start while another void is pending or unknown.
+            $inFlightVoid = PaymentAttempt::query()
+                ->where('payment_id', $locked->id)
+                ->where('operation', 'void')
+                ->whereIn('status', ['pending', 'unknown'])
+                ->exists();
+            if ($inFlightVoid) {
+                throw new RuntimeException('A void is already in progress or requires reconciliation for this payment.');
+            }
+
             $gateway = $this->gateways->for($locked->gateway);
             if (! $gateway->capabilities()->void) {
                 throw PaymentOperationNotSupported::for($locked->gateway, 'void');

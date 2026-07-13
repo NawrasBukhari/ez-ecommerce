@@ -136,3 +136,36 @@ it('does not block a capture when a create_session is settled pending with an ex
 
     expect($threw)->toBeFalse();
 })->group('hardening');
+
+it('blocks a void while a pending capture with an external id is still settling', function () {
+    $payment = createConflictPayment(PaymentStatus::Pending);
+
+    // A pending capture with an external reference (e.g. PayPal PENDING) is still
+    // settling — it must block void, refund, and another capture.
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'capture',
+        'idempotency_key' => 'cap-pending:'.$payment->public_id,
+        'status' => 'pending',
+        'external_id' => 'paypal_capture_ref_'.$payment->public_id,
+    ]);
+
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, 'void-key-'.uniqid()))
+        ->toThrow(ConflictingPaymentOperationException::class);
+})->group('hardening');
+
+it('blocks a second void with a different key while another void is pending', function () {
+    $payment = createConflictPayment(PaymentStatus::Authorized);
+
+    // First void is pending (in flight).
+    PaymentAttempt::query()->create([
+        'payment_id' => $payment->id,
+        'operation' => 'void',
+        'idempotency_key' => 'void-first:'.$payment->public_id,
+        'status' => 'pending',
+    ]);
+
+    // Second void with a different key must be blocked.
+    expect(fn () => app(VoidPaymentAuthorization::class)->execute($payment, 'void-second-'.uniqid()))
+        ->toThrow(RuntimeException::class, 'already in progress');
+})->group('hardening');

@@ -243,12 +243,14 @@ it('does not restore a reversed payment to Captured when a delayed completion we
             ->count())->toBe(1);
 })->group('hardening');
 
-it('treats a reversal arriving before a capture as a no-op and lets the completion finalize', function () {
+it('defers an early reversal and replays it after the completion webhook captures', function () {
     [$order, $payment] = createReversalOrderWithPayment(PaymentStatus::Pending, 10000, 0);
 
     // Reversal arrives while the payment is still Pending (no capture to reverse).
+    // It must be deferred — not marked processed — so it is not permanently lost.
+    $reversalExternalId = 'rev_early_'.uniqid();
     $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
-        webhookEvent: reversalEvent($payment, 'rev_early_'.uniqid(), 10000),
+        webhookEvent: reversalEvent($payment, $reversalExternalId, 10000),
     ));
     app(ReconcilePayment::class)->execute(new WebhookRequestData(gateway: 'fake', payload: '{"type":"payment.reversed"}'));
 
@@ -256,14 +258,24 @@ it('treats a reversal arriving before a capture as a no-op and lets the completi
         ->and(PaymentTransaction::query()
             ->where('payment_id', $payment->id)
             ->where('type', PaymentTransactionType::Reversal)
-            ->exists())->toBeFalse();
+            ->exists())->toBeFalse()
+        ->and(\EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent::query()
+            ->where('gateway', 'fake')
+            ->where('event_type', 'payment.reversed')
+            ->where('status', 'deferred')
+            ->exists())->toBeTrue();
 
-    // The delayed completion then finalizes the capture normally.
+    // The delayed completion finalizes the capture, then replays the deferred
+    // reversal — the payment ends up Reversed, not Captured.
     $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(
         webhookEvent: captureCompletionEvent($payment, 'cap_after_early_'.uniqid(), 10000),
     ));
     app(ReconcilePayment::class)->execute(new WebhookRequestData(gateway: 'fake', payload: '{"type":"payment.captured"}'));
 
-    expect($payment->fresh()->status)->toBe(PaymentStatus::Captured)
-        ->and($payment->fresh()->captured_minor)->toBe(10000);
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Reversed)
+        ->and(PaymentTransaction::query()
+            ->where('payment_id', $payment->id)
+            ->where('type', PaymentTransactionType::Reversal)
+            ->where('external_id', $reversalExternalId)
+            ->exists())->toBeTrue();
 })->group('hardening');

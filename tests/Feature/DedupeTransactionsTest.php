@@ -62,7 +62,24 @@ function createDedupePayment(int $amountMinor = 10000, PaymentStatus $status = P
 
 function dropTxnUniqueIndex(): void
 {
-    DB::statement('DROP INDEX IF EXISTS commerce_payment_transactions_external_unique');
+    $driver = DB::getDriverName();
+
+    if ($driver === 'mysql') {
+        // MySQL does not support DROP INDEX IF EXISTS; check first.
+        $indexExists = DB::selectOne(
+            "SELECT COUNT(*) as cnt FROM information_schema.statistics 
+             WHERE table_schema = DATABASE() 
+             AND table_name = 'commerce_payment_transactions' 
+             AND index_name = 'commerce_payment_transactions_external_unique'"
+        );
+
+        if ($indexExists && (int) $indexExists->cnt > 0) {
+            DB::statement('ALTER TABLE commerce_payment_transactions DROP INDEX commerce_payment_transactions_external_unique');
+        }
+    } else {
+        // SQLite and PostgreSQL both support DROP INDEX IF EXISTS.
+        DB::statement('DROP INDEX IF EXISTS commerce_payment_transactions_external_unique');
+    }
 }
 
 it('excludes authorization transactions from captured_minor when rebuilding aggregates', function () {
@@ -186,4 +203,89 @@ it('preserves a non-ledger terminal status when no ledger signal supersedes it',
     Artisan::call('commerce:dedupe-transactions', ['--payment' => $payment->id]);
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::Failed);
+})->group('hardening');
+
+it('derives fully refunded status when a partial capture is fully refunded relative to captured funds', function () {
+    $payment = createDedupePayment(10000, PaymentStatus::PartiallyCaptured);
+    dropTxnUniqueIndex();
+
+    PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 4000,
+        'currency' => 'AED',
+        'external_id' => 'cap_partial_ref_'.uniqid(),
+        'status' => 'succeeded',
+    ]);
+    PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Refund,
+        'amount_minor' => 4000,
+        'currency' => 'AED',
+        'external_id' => 'rfd_partial_ref_'.uniqid(),
+        'status' => 'succeeded',
+    ]);
+
+    Artisan::call('commerce:dedupe-transactions', ['--payment' => $payment->id]);
+
+    expect($payment->fresh()->status)->toBe(PaymentStatus::Refunded)
+        ->and($payment->fresh()->captured_minor)->toBe(4000)
+        ->and($payment->fresh()->refunded_minor)->toBe(4000)
+        ->and($payment->fresh()->order->refunded_total_minor)->toBe(4000);
+})->group('hardening');
+
+it('does not recalculate aggregates in dry-run mode even with --payment', function () {
+    $payment = createDedupePayment(10000, PaymentStatus::Authorized);
+    dropTxnUniqueIndex();
+
+    PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 5000,
+        'currency' => 'AED',
+        'external_id' => 'cap_dry_pay_'.uniqid(),
+        'status' => 'succeeded',
+    ]);
+
+    // Corrupt the aggregate to a stale value.
+    $payment->update(['captured_minor' => 99999]);
+
+    Artisan::call('commerce:dedupe-transactions', ['--payment' => $payment->id, '--dry-run' => true]);
+
+    // Dry-run must not write — the corrupt value stays.
+    expect($payment->fresh()->captured_minor)->toBe(99999);
+})->group('hardening');
+
+it('prefers a succeeded canonical transaction over an earlier failed one with the same external reference', function () {
+    $payment = createDedupePayment(10000, PaymentStatus::Captured);
+    dropTxnUniqueIndex();
+
+    $externalId = 'cap_canon_'.uniqid();
+
+    // Earlier failed transaction.
+    $failed = PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 10000,
+        'currency' => 'AED',
+        'external_id' => $externalId,
+        'status' => 'failed',
+    ]);
+
+    // Later succeeded transaction.
+    $succeeded = PaymentTransaction::query()->create([
+        'payment_id' => $payment->id,
+        'type' => PaymentTransactionType::Capture,
+        'amount_minor' => 10000,
+        'currency' => 'AED',
+        'external_id' => $externalId,
+        'status' => 'succeeded',
+    ]);
+
+    Artisan::call('commerce:dedupe-transactions', ['--payment' => $payment->id]);
+
+    // The succeeded transaction must survive; the failed one must be deleted.
+    expect(PaymentTransaction::query()->where('id', $succeeded->id)->exists())->toBeTrue()
+        ->and(PaymentTransaction::query()->where('id', $failed->id)->exists())->toBeFalse()
+        ->and($payment->fresh()->captured_minor)->toBe(10000);
 })->group('hardening');

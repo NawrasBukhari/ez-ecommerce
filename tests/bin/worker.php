@@ -107,10 +107,22 @@ class RaceWorker extends TestbenchTestCase
 
             return 0;
         } catch (UniqueConstraintViolationException $e) {
-            // Benign race-loser: the other process already inserted the unique row.
-            $this->emit(true, $action, ['race_loser' => true], null);
+            // Benign race-loser only for idempotent insert actions (fulfill,
+            // outbox, checkout). For capture/void/refund, a unique violation
+            // is unexpected and should be surfaced as an error, not hidden.
+            $benignActions = ['fulfill', 'outbox', 'checkout'];
+            if (in_array($action, $benignActions, true)) {
+                $this->emit(true, $action, ['race_loser' => true], null);
 
-            return 0;
+                return 0;
+            }
+
+            $this->emit(false, $action, null, [
+                'class' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
+
+            return 1;
         } catch (\Throwable $e) {
             $this->emit(false, $action, null, [
                 'class' => get_class($e),

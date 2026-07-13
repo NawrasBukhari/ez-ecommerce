@@ -210,3 +210,47 @@ it('creates only one outbox key for duplicate finalization', function () {
 
     expect(OutboxMessage::query()->where('key', $key)->count())->toBe(1);
 })->group('hardening');
+
+it('prevents a stale worker from regressing a processed row after lease expiry', function () {
+    Event::fake([OrderPaid::class]);
+
+    $msg = insertOutboxRow('processing', [
+        'locked_until' => now()->subMinutes(10),
+        'lock_token' => 'stale-token',
+        'attempts' => 1,
+    ]);
+
+    // Worker A (stale) claims the row with a new token, dispatches the event.
+    $jobA = new ProcessOutboxJob($msg->id);
+    $jobA->handle(app(\EzEcommerce\Core\Contracts\Clock::class));
+
+    // Worker A succeeds and marks processed.
+    expect($msg->fresh()->status)->toBe('processed');
+
+    // Now simulate Worker B (the stale lease owner) trying to mark failed
+    // with the old token — it must not regress the processed row.
+    DB::transaction(function () use ($msg) {
+        $row = OutboxMessage::query()->lockForUpdate()->find($msg->id);
+        if ($row !== null && $row->lock_token === 'stale-token' && $row->status !== 'processed') {
+            $row->update(['status' => 'failed_retryable', 'last_error' => 'stale worker']);
+        }
+    });
+
+    expect($msg->fresh()->status)->toBe('processed');
+})->group('hardening');
+
+it('enforces backoff on a directly dispatched failed_retryable row', function () {
+    Event::fake([OrderPaid::class]);
+
+    $msg = insertOutboxRow('failed_retryable', [
+        'attempts' => 1,
+        'available_at' => now()->addMinutes(5),
+    ]);
+
+    $job = new ProcessOutboxJob($msg->id);
+    $job->handle(app(\EzEcommerce\Core\Contracts\Clock::class));
+
+    // The row must not be claimed because available_at is in the future.
+    expect($msg->fresh()->status)->toBe('failed_retryable')
+        ->and($msg->fresh()->attempts)->toBe(1);
+})->group('hardening');

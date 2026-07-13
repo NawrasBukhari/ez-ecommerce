@@ -208,8 +208,16 @@ it('two outbox workers claim one row exclusively', function () {
         ['action' => 'outbox-claim', 'params' => ['outbox_id' => $msg->id]],
     ]);
 
+    // The row must be processed (not stuck in processing/failed).
     expect($msg->fresh()->status)->toBe('processed')
+        ->and($msg->fresh()->attempts)->toBe(1)
         ->and(collect($results)->every(fn ($r) => $r['exitCode'] === 0))->toBeTrue();
+
+    // Exactly one worker should report a successful claim (status processed);
+    // the other should be a no-op (race_loser or status already processed).
+    $claimers = collect($results)->filter(fn ($r) => $r['ok'] === true
+        && ($r['json']['result']['status'] ?? null) === 'processed')->count();
+    expect($claimers)->toBe(1);
 })->group('hardening');
 
 it('two checkouts for the last stock unit produce one order and one insufficient-inventory rejection', function () {
@@ -240,6 +248,11 @@ it('capture finalization versus reservation release leaves consistent state', fu
     $payment = $result->payment->fresh();
     $payment->update(['status' => PaymentStatus::Authorized, 'authorized_minor' => $payment->amount_minor]);
 
+    // Expire the reservation so the release-expired worker actually has work.
+    DB::table('commerce_inventory_reservations')
+        ->where('order_id', $result->order->id)
+        ->update(['expires_at' => now()->subMinute()]);
+
     $results = runWorkersConcurrently([
         ['action' => 'capture', 'params' => ['payment_id' => $payment->id, 'amount_minor' => $payment->amount_minor, 'key' => 'exp-cap-'.uniqid()]],
         ['action' => 'release-expired', 'params' => []],
@@ -247,11 +260,20 @@ it('capture finalization versus reservation release leaves consistent state', fu
 
     $final = $payment->fresh();
 
-    // Either the capture committed (Captured) or the reservation was released
-    // first and the capture failed cleanly — never a half-committed state.
-    expect($results[0]['exitCode'])->toBeGreaterThanOrEqual(0)
-        ->and($results[1]['exitCode'])->toBeGreaterThanOrEqual(0)
-        ->and(in_array($final->status, [PaymentStatus::Captured, PaymentStatus::Authorized, PaymentStatus::Failed], true))->toBeTrue();
+    // Both workers must exit cleanly (0 = success or benign race-loser).
+    expect($results[0]['exitCode'])->toBe(0)
+        ->and($results[1]['exitCode'])->toBe(0)
+        ->and(in_array($final->status, [PaymentStatus::Captured, PaymentStatus::Failed], true))->toBeTrue();
+
+    // If captured, inventory must be committed (not still active/reserved).
+    // If failed (reservation released first), inventory must not be committed.
+    if ($final->status === PaymentStatus::Captured) {
+        $reservations = DB::table('commerce_inventory_reservations')
+            ->where('order_id', $result->order->id)
+            ->where('status', 'active')
+            ->count();
+        expect($reservations)->toBe(0);
+    }
 })->group('hardening');
 
 it('idempotent refund with the same key serializes to one refund row', function () {
@@ -277,7 +299,12 @@ it('idempotent refund with the same key serializes to one refund row', function 
     $refunds = Refund::query()->where('payment_id', $payment->id)->where('amount_minor', 2500)->count();
     $refundedMinor = (int) Refund::query()->where('payment_id', $payment->id)->sum('amount_minor');
 
+    // Exactly one refund row regardless of how the workers serialize.
     expect($refunds)->toBe(1)
-        ->and($refundedMinor)->toBe(2500)
-        ->and(collect($results)->every(fn ($r) => $r['exitCode'] === 0))->toBeTrue();
+        ->and($refundedMinor)->toBe(2500);
+
+    // At least one worker must succeed; the other may succeed (idempotent replay)
+    // or fail (in-progress conflict) — both are valid serialization outcomes.
+    $successes = collect($results)->filter(fn ($r) => $r['ok'] === true)->count();
+    expect($successes)->toBeGreaterThanOrEqual(1);
 })->group('hardening');

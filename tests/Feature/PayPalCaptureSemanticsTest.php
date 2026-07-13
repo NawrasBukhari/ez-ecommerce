@@ -243,3 +243,93 @@ it('preserves an earlier partial capture when a follow-up capture fails', functi
             ->where('status', 'succeeded')
             ->sum('amount_minor'))->toBe(4000);
 })->group('hardening');
+
+it('marks a payment as Failed when the first capture attempt terminally declines with no prior captures', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'cap-initial-fail-'.uniqid(), paymentMethod: 'fake');
+
+    $payment = $result->payment->fresh();
+    $payment->update(['status' => PaymentStatus::Authorized, 'authorized_minor' => $payment->amount_minor]);
+
+    $this->app->instance(
+        FakePaymentGateway::class,
+        new FakePaymentGateway(captureResult: new PaymentResult(
+            success: false,
+            status: PaymentStatus::Failed,
+            amount: Money::fromMinor($payment->amount_minor, 'AED'),
+            externalId: 'fail_cap_'.uniqid(),
+            failure: new \EzEcommerce\Payments\Data\PaymentFailure('capture_declined', 'Card declined.', false),
+        )),
+    );
+
+    app(\EzEcommerce\Payments\Actions\CapturePayment::class)->executeForPayment(
+        $payment,
+        Money::fromMinor($payment->amount_minor, 'AED'),
+        'initial-fail-'.uniqid(),
+    );
+
+    $paymentAfter = $payment->fresh();
+    $attemptAfter = $paymentAfter->attempts()->where('operation', 'capture')->latest()->first();
+
+    expect($paymentAfter->status)->toBe(PaymentStatus::Failed)
+        ->and($paymentAfter->captured_minor)->toBe(0)
+        ->and($attemptAfter->status)->toBe('failed');
+})->group('hardening');
+
+it('resolves the original pending capture attempt to succeeded when a completion webhook arrives', function () {
+    ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
+
+    ['cart' => $cart] = EzEcommerce::cart()->createGuest('AED');
+    EzEcommerce::cart()->addItem($cart, $variant, 1);
+    $result = placeCheckoutOrder($cart, 'cap-pending-attempt-'.uniqid(), paymentMethod: 'fake');
+
+    $payment = $result->payment;
+    $sessionAttempt = $payment->attempts()->first();
+
+    // 1. Synchronous capture returns PENDING with an external reference.
+    $pendingExternalId = 'pending_cap_ref_'.uniqid();
+    $this->app->instance(
+        FakePaymentGateway::class,
+        new FakePaymentGateway(captureResult: new PaymentResult(
+            success: true,
+            status: PaymentStatus::Pending,
+            amount: Money::fromMinor($payment->amount_minor, 'AED'),
+            externalId: $pendingExternalId,
+        )),
+    );
+    app(\EzEcommerce\Payments\Actions\CapturePayment::class)->execute($payment, $sessionAttempt);
+
+    // The capture attempt is pending with the provider reference stored.
+    $captureAttempt = $payment->attempts()
+        ->where('operation', 'capture')
+        ->where('external_id', $pendingExternalId)
+        ->first();
+    expect($captureAttempt)->not->toBeNull()
+        ->and($captureAttempt->status)->toBe('pending');
+
+    // 2. Completion webhook finalizes the capture using the same external reference.
+    $completionEvent = new GatewayWebhookEvent(
+        eventType: 'payment.captured',
+        eventId: 'evt_completed_'.uniqid(),
+        paymentReference: $pendingExternalId,
+        transactionReference: $pendingExternalId,
+        amountMinor: $payment->amount_minor,
+        currency: 'AED',
+        providerStatus: 'succeeded',
+    );
+    $this->app->instance(FakePaymentGateway::class, new FakePaymentGateway(webhookEvent: $completionEvent));
+
+    app(ReconcilePayment::class)->execute(new WebhookRequestData(
+        gateway: 'fake',
+        payload: '{"type":"payment.captured"}',
+    ));
+
+    // 3. The original pending capture attempt is now resolved (no longer pending).
+    $captureAttempt = $captureAttempt->fresh();
+    expect($captureAttempt->status)->not->toBe('pending')
+        ->and($captureAttempt->external_id)->toBe($pendingExternalId)
+        ->and($payment->fresh()->status)->toBe(PaymentStatus::Captured);
+})->group('hardening');

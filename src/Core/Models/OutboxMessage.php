@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Casts\AsArrayObject;
  * @property \Carbon\CarbonImmutable|null $available_at
  * @property \Carbon\CarbonImmutable|null $locked_at
  * @property \Carbon\CarbonImmutable|null $locked_until
+ * @property string|null $lock_token
  * @property int $attempts
  * @property string|null $last_error
  * @property \Carbon\CarbonImmutable|null $processed_at
@@ -28,6 +29,7 @@ class OutboxMessage extends CommerceModel
         'available_at',
         'locked_at',
         'locked_until',
+        'lock_token',
         'attempts',
         'last_error',
         'processed_at',

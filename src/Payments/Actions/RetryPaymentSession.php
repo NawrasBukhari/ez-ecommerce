@@ -115,6 +115,19 @@ final class RetryPaymentSession
         DB::transaction(function () use ($payment, $attempt) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
             $this->assertNoConflictingPaymentOperation->execute($locked, 'create_session');
+
+            // Same-operation guard: a second create_session with a different key
+            // must not start while another is pending or unknown.
+            $inFlightSession = PaymentAttempt::query()
+                ->where('payment_id', $locked->id)
+                ->where('operation', 'create_session')
+                ->where('id', '!=', $attempt->id)
+                ->whereIn('status', ['pending', 'unknown'])
+                ->exists();
+            if ($inFlightSession) {
+                throw new RuntimeException('A payment session is already in progress or requires reconciliation.');
+            }
+
             $attempt->update(['status' => 'pending']);
         });
 

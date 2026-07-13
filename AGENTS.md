@@ -24,6 +24,23 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 ## Sprint status (current)
 
+### Shipped (PSP lifecycle sprint 6 — post-review fixes)
+
+| Area | What landed |
+|------|-------------|
+| **Initial capture decline** | `HandleCaptureResult::handleFailed` derives payment status from ledger: zero captures + terminal `Failed` result → `PaymentStatus::Failed` (no more stuck `Authorized`); partial captures preserved |
+| **Deferred reversal replay** | Early reversal webhooks (arriving before capture) are stored as `deferred` (not `processed`); after a completion webhook captures, `ReconcilePayment` replays deferred reversals automatically — reversal is never permanently lost under out-of-order delivery |
+| **Pending attempt resolution** | Completion webhook locates the original pending capture attempt by provider reference and marks it resolved (no more stale pending attempts after capture) |
+| **Operation-specific conflict rules** | `AssertNoConflictingPaymentOperation` uses operation-specific in-flight rules: pending `create_session` with external_id is settled, but pending `capture` with external_id (PayPal PENDING) is still in flight and blocks void/refund |
+| **Same-operation race guards** | `VoidPaymentAuthorization` and `RetryPaymentSession` now check for existing pending/unknown same-operation attempts inside the lock (no more concurrent void×2 or session×2) |
+| **Non-fatal outbox enqueue** | `DB::afterCommit` dispatch in `FinalizeAcceptedPayment` catches enqueue failures silently — the outbox row is already committed; `commerce:process-outbox` is the durable fallback |
+| **Outbox claim tokens** | `lock_token` column + UUID per claim; completion and failure updates verify token ownership; `processed` is terminal (stale workers cannot regress it); backoff enforced on direct dispatch |
+| **Dedupe accounting fixes** | Full-refund check is `refunded >= captured` (not `>= amount`); `order.refunded_total_minor` rebuilt from payment ledger; canonical selection prefers succeeded over earlier failed; dry-run never writes |
+| **Failed → Pending blocked** | `RefundTransitionPolicy` blocks `Failed → Pending` (delayed pending webhooks cannot regress a failed refund) |
+| **MySQL index removal** | `DedupeTransactionsTest` uses driver-aware index removal (MySQL `ALTER TABLE DROP INDEX`, SQLite/PostgreSQL `DROP INDEX IF EXISTS`) |
+| **Race assertions strengthened** | Capture-vs-expiry expires reservations and asserts consistent inventory; outbox claim asserts exactly one claimer; worker narrows benign `UniqueConstraintViolationException` to idempotent insert actions only |
+| **Tests** | 209 Pest tests across 25 feature files |
+
 ### Shipped (PSP lifecycle sprint 5 — full hardening)
 
 | Area | What landed |
@@ -39,7 +56,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Refund policy enforcement** | `PaymentOperationPolicy::canRefund()` guarded inside lock before reserving funds; rejected for cancelled/failed/authorized-only/pending/fully-refunded/zero-balance |
 | **Multi-process test harness** | `tests/bin/worker.php` reads `DB_*`, no `RefreshDatabase`, JSON stdout, exit codes; `ConcurrencyRaceTest` in `tests/Races` with 8 two-process races; `RaceTestCase` disables per-test txn so children see committed data |
 | **Isolated installation test** | `PackageInstallationTest` in `tests/Installation` via `InstallationTestCase` (no `loadMigrationsFrom`); verifies `runsMigrations()` discovery, columns/indexes, unique constraints, commands |
-| **Tests** | 208 Pest tests across 24 feature files |
+| **Tests** | 208 Pest tests across 24 feature files (sprint 5; 209/25 after sprint 6) |
 
 ### Shipped (PSP lifecycle sprint 4)
 
@@ -287,6 +304,10 @@ Public checkout payment methods: `checkout.public_payment_methods` (default `['s
 9. **Assuming the outbox is exactly-once** — it is at-least-once; consumers must be idempotent. The unique key prevents duplicate inserts, not duplicate deliveries.
 10. **Treating a `failed` void key as retriable with the same key** — `failed` is terminal; replay returns the cached failure without a new row. Use a new key for a fresh void attempt.
 11. **Restoring a `Reversed` payment to `Captured`** — reversal is terminal; a late completion webhook must not un-reverse.
+12. **Marking a deferred reversal as `processed`** — an early reversal webhook (before capture) must be stored as `deferred` and replayed after completion; marking it `processed` permanently loses the reversal.
+13. **Comparing refunded against the original amount for full-refund status** — full refund is relative to captured funds (`refunded >= captured`), not the original payment amount.
+14. **Regressing a `Failed` refund to `Pending`** — `Failed` is terminal except via explicit reconciliation to `Succeeded`; a delayed pending webhook must not regress it.
+15. **Treating pending + external_id as settled for all operations** — a pending `create_session` with external_id is settled, but a pending `capture` with external_id (PayPal PENDING) is still in flight and blocks void/refund.
 
 ---
 

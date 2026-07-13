@@ -177,8 +177,8 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 
 ## Production readiness
 
-**Overall: 7.8/10** — strong beta commerce engine; PSP paths hardened with capture-result semantics, reversal/dispute handling, a transactional at-least-once outbox, and multi-process race coverage.  
-*Current head: `e2a1cc3` — PSP lifecycle sprint 5 full hardening.*
+**Overall: 7.2/10** — strong beta commerce engine; PSP paths hardened with capture-result semantics, reversal/dispute handling, a transactional at-least-once outbox, a payment-wide conflict guard with operation-specific rules, outbox claim tokens, and multi-process race coverage. PayPal reversal ordering and pending-attempt resolution are now handled; remaining PSP gaps are live sandbox contract tests and edge-case concurrency proof.  
+*Current head: `a0b7310` — post-review fixes for reversal ordering, pending attempt resolution, conflict guard, outbox ownership, dedupe accounting, and refund monotonicity.*
 
 | Area | Rating |
 |------|--------|
@@ -188,7 +188,7 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 | Manual/null payments | 9/10 |
 | Headless REST API | 7.5/10 |
 | Stripe integration | 7/10 |
-| PayPal integration | 7/10 |
+| PayPal integration | 6/10 |
 | Telr integration | 5.5/10 |
 | Tests and CI | 7.5/10 |
 
@@ -197,7 +197,7 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 | Tier | Verdict |
 |------|---------|
 | **Core / manual commerce** | Strong beta |
-| **Inventory + order lifecycle** | Production-ready after hardening sprint 5 |
+| **Inventory + order lifecycle** | Strong beta — not yet production-ready; PSP live sandbox contract tests and edge-case concurrency proof remain |
 | **REST storefront checkout** | Functional — fail-closed price lists, address-aware quoting |
 | **Stripe** | Authorization + voiding; refund state mapping; partial-capture validation; manual capture safe |
 | **PayPal** | Capture semantics fixed (PENDING finalizes nothing); reversal/dispute handling; refund state mapping |
@@ -237,7 +237,7 @@ The `order.paid` outbox is **at-least-once** with idempotent consumers required.
 - **Complete void idempotency** — `failed` keys replay the cached terminal failure (no duplicate row); `failed_retryable` reuses the attempt; payload-hash mismatch rejection
 - **Partial-capture validation ordering** — Stripe partial-capture config check runs before any attempt row is created (no `pending`/`unknown` orphan)
 - **Refund policy enforcement** — `PaymentOperationPolicy::canRefund()` guarded inside the lock before reserving funds (cancelled order, failed, authorized-only, pending, fully refunded, zero-balance all rejected)
-- **Multi-process test harness** — `tests/bin/worker.php` reads `DB_*` env, prints JSON, asserts exit codes; 8 two-process races on MySQL/PostgreSQL
+- **Multi-process test harness** — `tests/bin/worker.php` reads `DB_*` env, prints JSON, asserts exit codes; 8 two-process races on MySQL/PostgreSQL. Race assertions verify exclusive claim counts, consistent inventory state, and exit codes — but concurrency safety is not fully proven until CI runs pass on MySQL and PostgreSQL (capture-vs-expiry, outbox claim, and idempotent-refund assertions are strengthened but some edge cases remain under-tested; the suite is real progress, not proof of full concurrency safety)
 - **Isolated installation test** — `PackageInstallationTest` verifies migration discovery via `runsMigrations()` without `loadMigrationsFrom`
 
 ### Recently fixed (PSP lifecycle sprint 3)
@@ -757,7 +757,7 @@ CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=harde
 | `PaymentConflictGuardTest` | Payment-wide conflict guard (capture/void/refund/session compatibility) |
 | `PackageInstallationTest` | Migration discovery via `runsMigrations()` (no `loadMigrationsFrom`), unique indexes, commands |
 | `StripeVoidStatesTest` | Stripe void across all cancellable PaymentIntent states |
-| `ConcurrencyRaceTest` | Two-process MySQL/PostgreSQL races: fulfillment, capture, capture-vs-void, refunds, outbox claim, last-stock checkout, capture-vs-expiry, idempotent refund |
+| `ConcurrencyRaceTest` | Two-process MySQL/PostgreSQL races: fulfillment, capture, capture-vs-void, refunds, outbox claim (asserts one claim), last-stock checkout, capture-vs-expiry (asserts inventory consistency), idempotent refund (asserts one row) — see caveats in the race section above |
 | `ApiTest` / `ApiExtendedTest` | REST surface, token auth, capture/fulfill |
 | `SecurityTest` | Fail-closed API, scopes, webhook auth |
 | `SprintApiTest` | Customers, cart merge, retry payment, returns |
