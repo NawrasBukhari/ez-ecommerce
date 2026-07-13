@@ -13,6 +13,7 @@ use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 
 final class FinalizeAcceptedPayment
@@ -76,8 +77,10 @@ final class FinalizeAcceptedPayment
             // Exactly-once OrderPaid via a unique outbox row keyed on order.paid:{order_id}.
             // Two concurrent finalizers race on the unique constraint; the loser skips dispatch.
             // A crash after insert but before commit rolls the row back, so recovery re-dispatches.
+            // The insert runs in its own savepoint so a unique violation on PostgreSQL doesn't
+            // poison the surrounding transaction (PostgreSQL aborts the whole txn on any error).
             try {
-                OutboxMessage::query()->create([
+                DB::transaction(fn () => OutboxMessage::query()->create([
                     'event' => 'order.paid',
                     'key' => "order.paid:{$order->id}",
                     'payload' => [
@@ -85,7 +88,7 @@ final class FinalizeAcceptedPayment
                         'order_public_id' => $order->public_id,
                         'payment_id' => $payment->id,
                     ],
-                ]);
+                ]));
 
                 Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
             } catch (UniqueConstraintViolationException) {
