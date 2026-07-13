@@ -83,14 +83,15 @@ final class VoidPaymentAuthorization
         }
 
         if (! $result->success) {
+            $failure = $result->failure;
             $attempt->update([
                 'status' => 'failed',
-                'error_code' => $result->failure?->code,
-                'error_message' => $result->failure?->message,
+                'error_code' => $failure->code,
+                'error_message' => $failure->message,
             ]);
             $this->recalculateOrderPaymentStatus->execute($payment->order);
 
-            throw new RuntimeException('Void failed: '.($result->failure?->message ?? 'unknown'));
+            throw new RuntimeException('Void failed: '.$failure->message);
         }
 
         $payment = DB::transaction(function () use ($payment, $attempt, $result) {

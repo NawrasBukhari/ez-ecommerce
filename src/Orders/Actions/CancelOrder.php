@@ -11,6 +11,7 @@ use EzEcommerce\Core\Enums\TransitionDimension;
 use EzEcommerce\Inventory\Actions\ReleaseInventoryReservation;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Actions\VoidPaymentAuthorization;
+use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -50,6 +51,10 @@ final class CancelOrder
         $order->load('payments');
 
         foreach ($order->payments as $payment) {
+            if (! $payment instanceof Payment) {
+                continue;
+            }
+
             if ($payment->status !== PaymentStatus::Authorized) {
                 continue;
             }

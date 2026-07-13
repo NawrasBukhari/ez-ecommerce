@@ -229,12 +229,6 @@ parameters:
 			path: src/Checkout/Actions/PlaceOrder.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Commands/ReconcileFinalizationsCommand.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Core\\Models\\IdempotencyRecord\:\:\$attempts\.$#'
 			identifier: property.notFound
 			count: 1
@@ -295,18 +289,6 @@ parameters:
 			path: src/Fulfillment/DefaultFulfillmentReleasePolicy.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$payment_status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Fulfillment/DefaultFulfillmentReleasePolicy.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Fulfillment/DefaultFulfillmentReleasePolicy.php
-
-		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$status\.$#'
 			identifier: property.notFound
 			count: 1
@@ -341,12 +323,6 @@ parameters:
 			identifier: property.notFound
 			count: 1
 			path: src/Inventory/Actions/ReceiveStock.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Inventory/Actions/ReleaseExpiredReservations.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Inventory\\Models\\InventoryBalance\:\:\$reserved\.$#'
@@ -457,46 +433,10 @@ parameters:
 			path: src/Orders/Actions/AllocateLineDiscounts.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$fulfillment_status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CancelOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$payment_status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CancelOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CancelOrder.php
-
-		-
 			message: '#^Parameter \#1 \$reservation of method EzEcommerce\\Inventory\\Actions\\ReleaseInventoryReservation\:\:execute\(\) expects EzEcommerce\\Inventory\\Models\\InventoryReservation, Illuminate\\Database\\Eloquent\\Model given\.$#'
 			identifier: argument.type
 			count: 1
 			path: src/Orders/Actions/CancelOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/CompleteOrder.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$payment_status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/ConfirmOrderOnPaymentAccepted.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/ConfirmOrderOnPaymentAccepted.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Customers\\Models\\Address\:\:\$metadata\.$#'
@@ -631,19 +571,7 @@ parameters:
 			path: src/Orders/Actions/CreateOrderFromCart.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$fulfillment_status\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/RecalculateOrderFulfillmentStatus.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$grand_total_minor\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$payment_status\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
@@ -669,7 +597,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
 			identifier: property.notFound
-			count: 3
+			count: 4
 			path: src/Payments/Drivers/FakePaymentGateway.php
 
 		-
