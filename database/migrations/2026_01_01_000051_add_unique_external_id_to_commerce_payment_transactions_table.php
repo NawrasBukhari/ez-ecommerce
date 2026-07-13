@@ -15,8 +15,15 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('commerce_payment_transactions', function (Blueprint $table) {
-            $table->dropUnique('commerce_payment_transactions_external_unique');
-        });
+        // Guard: the constraint may have been manually dropped (e.g. by the
+        // dedupe test harness). dropUnique throws on MySQL/PG if it's already
+        // gone, so check first via hasIndex on the schema builder.
+        if (Schema::hasTable('commerce_payment_transactions')
+            && Schema::hasIndex('commerce_payment_transactions', 'commerce_payment_transactions_external_unique')
+        ) {
+            Schema::table('commerce_payment_transactions', function (Blueprint $table) {
+                $table->dropUnique('commerce_payment_transactions_external_unique');
+            });
+        }
     }
 };

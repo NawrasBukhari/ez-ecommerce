@@ -76,8 +76,23 @@ class RaceWorker extends TestbenchTestCase
             ]);
         }
 
+        // Mark migrations as already run so Spatie's runsMigrations() /
+        // loadMigrationsFrom() registers paths without creating
+        // MigrateProcessor instances. The parent test already migrated the
+        // shared DB; the worker must not re-run or roll back migrations.
+        // Without this, loadMigrationsFrom dispatches 53 artisan migrate
+        // commands per worker boot and migrate:rollback at tearDown, causing
+        // exit 255 when any migration's down() hits a state the test modified.
+        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = true;
+
         config()->set('ez-ecommerce.currency.default', 'AED');
+        config()->set('ez-ecommerce.tax.rate', 0.05);
+        config()->set('ez-ecommerce.shipping.flat_rate_minor', 1000);
         config()->set('ez-ecommerce.features.api', true);
+        config()->set('ez-ecommerce.features.subscriptions', true);
+        config()->set('ez-ecommerce.features.marketplace', true);
+        config()->set('ez-ecommerce.features.multi_store', true);
+        config()->set('ez-ecommerce.features.b2b', true);
         config()->set('ez-ecommerce.features.outbound_webhooks', true);
         config()->set('ez-ecommerce.api.token', 'test-api-token');
         config()->set('ez-ecommerce.api.scoped_tokens', ['test-api-token' => ['*']]);
@@ -88,9 +103,9 @@ class RaceWorker extends TestbenchTestCase
 
     public function runAction(string $action, array $params): int
     {
-        $this->setUp();
-
         try {
+            $this->setUp();
+
             $result = match ($action) {
                 'fulfill' => $this->fulfill($params),
                 'outbox' => $this->outbox($params),
@@ -131,7 +146,9 @@ class RaceWorker extends TestbenchTestCase
 
             return 1;
         } finally {
-            $this->tearDown();
+            if ($this->app) {
+                $this->tearDown();
+            }
         }
     }
 
