@@ -26,7 +26,9 @@ use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Tests\Support\SetsUpCatalog;
 use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Schema;
 
 uses(SetsUpCatalog::class);
 
@@ -719,10 +721,11 @@ it('dedupe-transactions recalculates payment aggregates after dedup', function (
     $externalId = 'cap_recalc_'.uniqid();
 
     // Temporarily drop the unique constraint so we can insert a duplicate,
-    // simulating a pre-migration database state.
-    \Illuminate\Support\Facades\DB::statement(
-        'DROP INDEX IF EXISTS commerce_payment_transactions_external_unique',
-    );
+    // simulating a pre-migration database state. dropUnique is driver-agnostic
+    // (DROP CONSTRAINT on PG, DROP INDEX on MySQL/SQLite).
+    Schema::table('commerce_payment_transactions', function (Blueprint $table) {
+        $table->dropUnique('commerce_payment_transactions_external_unique');
+    });
 
     PaymentTransaction::query()->create([
         'payment_id' => $payment->id,

@@ -10,8 +10,9 @@ use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 function createDedupePayment(int $amountMinor = 10000, PaymentStatus $status = PaymentStatus::Captured): Payment
 {
@@ -62,24 +63,13 @@ function createDedupePayment(int $amountMinor = 10000, PaymentStatus $status = P
 
 function dropTxnUniqueIndex(): void
 {
-    $driver = DB::getDriverName();
-
-    if ($driver === 'mysql') {
-        // MySQL does not support DROP INDEX IF EXISTS; check first.
-        $indexExists = DB::selectOne(
-            "SELECT COUNT(*) as cnt FROM information_schema.statistics 
-             WHERE table_schema = DATABASE() 
-             AND table_name = 'commerce_payment_transactions' 
-             AND index_name = 'commerce_payment_transactions_external_unique'"
-        );
-
-        if ($indexExists && (int) $indexExists->cnt > 0) {
-            DB::statement('ALTER TABLE commerce_payment_transactions DROP INDEX commerce_payment_transactions_external_unique');
-        }
-    } else {
-        // SQLite and PostgreSQL both support DROP INDEX IF EXISTS.
-        DB::statement('DROP INDEX IF EXISTS commerce_payment_transactions_external_unique');
-    }
+    // Laravel's Blueprint::dropUnique is driver-agnostic: it maps to
+    // ALTER TABLE ... DROP CONSTRAINT on PostgreSQL, ALTER TABLE ... DROP INDEX
+    // on MySQL, and DROP INDEX on SQLite. Raw SQL fails on PG (constraint backs
+    // the index) and on MySQL (no IF EXISTS syntax for DROP INDEX).
+    Schema::table('commerce_payment_transactions', function (Blueprint $table) {
+        $table->dropUnique('commerce_payment_transactions_external_unique');
+    });
 }
 
 it('excludes authorization transactions from captured_minor when rebuilding aggregates', function () {

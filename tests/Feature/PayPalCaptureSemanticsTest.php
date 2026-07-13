@@ -237,7 +237,7 @@ it('preserves an earlier partial capture when a follow-up capture fails', functi
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::PartiallyCaptured)
         ->and($payment->fresh()->captured_minor)->toBe(4000)
-        ->and(PaymentTransaction::query()
+        ->and((int) PaymentTransaction::query()
             ->where('payment_id', $payment->id)
             ->where('type', PaymentTransactionType::Capture)
             ->where('status', 'succeeded')

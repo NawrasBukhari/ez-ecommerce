@@ -2,6 +2,7 @@
 
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Models\OutboxMessage;
+use EzEcommerce\Facades\EzEcommerce;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Models\Order;
 use EzEcommerce\Refunds\Models\Refund;

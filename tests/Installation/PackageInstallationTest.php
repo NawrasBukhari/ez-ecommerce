@@ -46,26 +46,34 @@ it('enforces the outbox key unique index via duplicate-insert rejection', functi
 
 it('enforces the unique payment-transaction external reference via duplicate-insert rejection', function () {
     // Driver-agnostic: a duplicate (payment_id, type, external_id) succeeded
-    // row must be rejected by the unique index. The installation base runs with
-    // FK disabled so this isolates the unique-index behaviour.
-    $row = [
-        'payment_id' => 1,
-        'attempt_id' => 1,
-        'type' => 'capture',
-        'amount_minor' => 100,
-        'currency' => 'AED',
-        'external_id' => 'ext_dup_check',
-        'status' => 'succeeded',
-        'processed_at' => now(),
-        'metadata' => '{}',
-        'created_at' => now(),
-        'updated_at' => now(),
-    ];
+    // row must be rejected by the unique index. The installation base disables
+    // FKs on SQLite via config; on MySQL/PG we disable them explicitly here so
+    // we can insert with payment_id=1/attempt_id=1 without standing up a full
+    // order/payment/attempt graph. This isolates the unique-index behaviour.
+    Schema::disableForeignKeyConstraints();
 
-    DB::table('commerce_payment_transactions')->insert($row);
+    try {
+        $row = [
+            'payment_id' => 1,
+            'attempt_id' => 1,
+            'type' => 'capture',
+            'amount_minor' => 100,
+            'currency' => 'AED',
+            'external_id' => 'ext_dup_check',
+            'status' => 'succeeded',
+            'processed_at' => now(),
+            'metadata' => '{}',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
 
-    expect(fn () => DB::table('commerce_payment_transactions')->insert($row))
-        ->toThrow(Exception::class);
+        DB::table('commerce_payment_transactions')->insert($row);
+
+        expect(fn () => DB::table('commerce_payment_transactions')->insert($row))
+            ->toThrow(Exception::class);
+    } finally {
+        Schema::enableForeignKeyConstraints();
+    }
 })->group('hardening');
 
 it('registers all package artisan commands', function () {
