@@ -38,7 +38,6 @@ final class FinalizeAcceptedPayment
         array $metadata = [],
     ): Payment {
         $payment->refresh();
-        $wasFullyCaptured = $payment->status === PaymentStatus::Captured;
 
         $payment = $this->applyPaymentCapture->execute(
             $payment,
@@ -52,7 +51,7 @@ final class FinalizeAcceptedPayment
         $this->recalculateOrderPaymentStatus->execute($payment->order);
 
         try {
-            $this->completeOrderAfterCapture($payment, $wasFullyCaptured);
+            $this->completeOrderAfterCapture($payment);
         } catch (ReservationExpiredException|InventoryCommitException $e) {
             $this->recordInventoryFinalizationFailure->execute($payment, $attempt, $e->getMessage());
 
@@ -63,7 +62,7 @@ final class FinalizeAcceptedPayment
     }
 
     /** @throws ReservationExpiredException|InventoryCommitException */
-    public function completeOrderAfterCapture(Payment $payment, bool $wasFullyCaptured = false): void
+    public function completeOrderAfterCapture(Payment $payment): void
     {
         $payment->refresh();
         $order = $payment->order;
@@ -76,7 +75,7 @@ final class FinalizeAcceptedPayment
                 ? $order->metadata->getArrayCopy()
                 : (array) ($order->metadata ?? []);
 
-            if (! $wasFullyCaptured && ! ($metadata['order_paid_dispatched'] ?? false)) {
+            if (! ($metadata['order_paid_dispatched'] ?? false)) {
                 Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
                 $metadata['order_paid_dispatched'] = true;
                 $order->update(['metadata' => $metadata]);

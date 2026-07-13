@@ -10,6 +10,7 @@ use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Actions\RefundPayment;
 use EzEcommerce\Refunds\Models\Refund;
+use EzEcommerce\Webhooks\Inbound\Exceptions\InboundWebhookConflictException;
 use EzEcommerce\Webhooks\Inbound\Models\ProcessedGatewayEvent;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
@@ -34,8 +35,9 @@ final class ReconcileRefund
                 'PAYMENT.CAPTURE.REFUNDED',
                 'PAYMENT.REFUND.COMPLETED',
                 'PAYMENT.REFUND.FAILED',
+                'PAYMENT.REFUND.PENDING',
             ], true),
-            'fake' => $eventType === 'payment.refunded',
+            'fake' => in_array($eventType, ['payment.refunded', 'refund.updated'], true),
             default => false,
         };
     }
@@ -78,10 +80,10 @@ final class ReconcileRefund
             return $event;
         }
 
-        $succeeded = $this->isSuccessfulRefundEvent($request->gateway, $event->eventType);
+        $providerStatus = $event->providerStatus;
 
         try {
-            DB::transaction(function () use ($request, $event, $attempt, $refund, $payment, $succeeded) {
+            DB::transaction(function () use ($request, $event, $attempt, $refund, $payment, $providerStatus) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
                     ->where('external_event_id', $event->eventId)
@@ -105,7 +107,9 @@ final class ReconcileRefund
                     $record->update(['status' => 'processing']);
                 }
 
-                if ($succeeded) {
+                $outcome = $this->classifyRefundOutcome($request->gateway, $event->eventType, $providerStatus);
+
+                if ($outcome === 'succeeded') {
                     if ($refund->status === RefundStatus::Succeeded) {
                         $record->update(['status' => 'processed', 'processed_at' => $this->clock->now()]);
 
@@ -124,7 +128,10 @@ final class ReconcileRefund
                             externalId: $event->transactionReference ?? $event->paymentReference,
                         ),
                     );
-                } elseif ($this->isFailedRefundEvent($request->gateway, $event->eventType)) {
+                } elseif ($outcome === 'pending') {
+                    $refund->update(['status' => RefundStatus::Pending]);
+                    $attempt->update(['status' => 'pending']);
+                } elseif ($outcome === 'failed') {
                     $refund->update(['status' => RefundStatus::Failed]);
                     $attempt->update(['status' => 'failed']);
                 }
@@ -136,7 +143,16 @@ final class ReconcileRefund
                 ]);
             });
         } catch (UniqueConstraintViolationException) {
-            return $event;
+            $record = ProcessedGatewayEvent::query()
+                ->where('gateway', $request->gateway)
+                ->where('external_event_id', $event->eventId)
+                ->first();
+
+            if ($record !== null && $record->status === 'processed') {
+                return $event;
+            }
+
+            throw new InboundWebhookConflictException($record?->status);
         }
 
         return $event;
@@ -171,19 +187,34 @@ final class ReconcileRefund
         return null;
     }
 
-    private function isSuccessfulRefundEvent(string $gateway, string $eventType): bool
+    /**
+     * Classify a refund webhook into one of: succeeded, pending, failed, or null (unknown/no-op).
+     */
+    private function classifyRefundOutcome(string $gateway, string $eventType, ?string $providerStatus): ?string
     {
-        return match ($gateway) {
-            'stripe' => in_array($eventType, ['charge.refunded', 'refund.updated'], true),
-            'paypal' => in_array($eventType, ['PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.REFUND.COMPLETED'], true),
-            'fake' => $eventType === 'payment.refunded',
-            default => false,
-        };
-    }
+        if ($gateway === 'stripe' || $gateway === 'fake') {
+            return match ($providerStatus ?? '') {
+                'succeeded' => 'succeeded',
+                'pending', 'requires_action' => 'pending',
+                'failed', 'canceled' => 'failed',
+                default => null,
+            };
+        }
 
-    private function isFailedRefundEvent(string $gateway, string $eventType): bool
-    {
-        return $gateway === 'paypal' && $eventType === 'PAYMENT.REFUND.FAILED';
+        if ($gateway === 'paypal') {
+            return match ($eventType) {
+                'PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.REFUND.COMPLETED' => 'succeeded',
+                'PAYMENT.REFUND.PENDING' => 'pending',
+                'PAYMENT.REFUND.FAILED' => 'failed',
+                default => null,
+            };
+        }
+
+        if ($gateway === 'fake' && $eventType === 'payment.refunded') {
+            return 'succeeded';
+        }
+
+        return null;
     }
 
     /** @return array<string, mixed> */

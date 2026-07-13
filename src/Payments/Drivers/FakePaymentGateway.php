@@ -14,6 +14,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 
 final class FakePaymentGateway implements PaymentGateway
@@ -21,6 +22,7 @@ final class FakePaymentGateway implements PaymentGateway
     public function __construct(
         private ?PaymentSessionResult $sessionResult = null,
         private ?PaymentResult $captureResult = null,
+        private ?PaymentResult $voidResult = null,
         private ?RefundResult $refundResult = null,
         private ?GatewayWebhookEvent $webhookEvent = null,
         private bool $sessionThrows = false,
@@ -34,6 +36,7 @@ final class FakePaymentGateway implements PaymentGateway
             sessions: true,
             authorization: true,
             capture: true,
+            void: true,
             refund: true,
             webhooks: true,
         );
@@ -63,6 +66,16 @@ final class FakePaymentGateway implements PaymentGateway
             status: PaymentStatus::Captured,
             amount: $data->amount,
             externalId: 'fake_capture_'.$data->attempt->public_id,
+        );
+    }
+
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        return $this->voidResult ?? new PaymentResult(
+            success: true,
+            status: PaymentStatus::Cancelled,
+            amount: $data->amount,
+            externalId: 'fake_void_'.$data->attempt->public_id,
         );
     }
 

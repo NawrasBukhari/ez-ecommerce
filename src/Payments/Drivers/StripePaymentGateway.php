@@ -14,6 +14,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
@@ -46,6 +47,7 @@ final class StripePaymentGateway implements PaymentGateway
             sessions: true,
             authorization: true,
             capture: true,
+            void: true,
             refund: true,
             webhooks: true,
         );
@@ -98,6 +100,37 @@ final class StripePaymentGateway implements PaymentGateway
         );
     }
 
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        $intentId = $data->providerReference
+            ?? $data->attempt->external_id
+            ?? $this->sessionPaymentIntentId($data->payment)
+            ?? ($data->payment->metadata['stripe_payment_intent_id'] ?? null);
+
+        if ($intentId === null) {
+            throw PaymentOperationNotSupported::for('stripe', 'void without payment_intent');
+        }
+
+        $intent = $this->client->paymentIntents->retrieve($intentId);
+
+        if ($intent->status !== 'requires_capture') {
+            throw PaymentOperationNotSupported::for('stripe', 'void on non-capturable intent');
+        }
+
+        $cancelled = $this->client->paymentIntents->cancel(
+            $intentId,
+            $this->idempotencyOptions($data->attempt->idempotency_key, "void:{$data->attempt->id}"),
+        );
+
+        return new PaymentResult(
+            success: $cancelled->status === 'canceled',
+            status: PaymentStatus::Cancelled,
+            amount: $data->amount,
+            externalId: $cancelled->id,
+            metadata: ['stripe_payment_intent_id' => $cancelled->id],
+        );
+    }
+
     public function refund(RefundPaymentData $data): RefundResult
     {
         $intentId = $data->providerReference
@@ -145,21 +178,32 @@ final class StripePaymentGateway implements PaymentGateway
 
         $paymentReference = match ($type) {
             'charge.captured' => $object['payment_intent'] ?? null,
+            'charge.refunded', 'refund.updated' => $object['payment_intent'] ?? $object['id'] ?? null,
             default => $object['id'] ?? null,
         };
 
         $transactionReference = match ($type) {
             'charge.captured' => $object['id'] ?? null,
+            'charge.refunded', 'refund.updated' => $object['id'] ?? null,
             default => $object['latest_charge'] ?? $object['id'] ?? null,
         };
+
+        $amountMinor = match ($type) {
+            'payment_intent.amount_capturable_updated' => isset($object['amount_capturable']) ? (int) $object['amount_capturable'] : null,
+            'charge.refunded', 'refund.updated' => isset($object['amount']) ? (int) $object['amount'] : null,
+            default => isset($object['amount']) ? (int) $object['amount'] : null,
+        };
+
+        $providerStatus = is_string($object['status'] ?? null) ? (string) $object['status'] : null;
 
         return new GatewayWebhookEvent(
             eventType: $type,
             eventId: $payload['id'] ?? hash('sha256', $data->payload),
             paymentReference: is_string($paymentReference) ? $paymentReference : null,
             transactionReference: is_string($transactionReference) ? $transactionReference : null,
-            amountMinor: isset($object['amount']) ? (int) $object['amount'] : null,
+            amountMinor: $amountMinor,
             currency: isset($object['currency']) ? strtoupper((string) $object['currency']) : null,
+            providerStatus: $providerStatus,
         );
     }
 

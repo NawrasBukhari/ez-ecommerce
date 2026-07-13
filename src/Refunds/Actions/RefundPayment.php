@@ -19,6 +19,7 @@ use EzEcommerce\Payments\Models\PaymentAttempt;
 use EzEcommerce\Payments\Models\PaymentTransaction;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
 use EzEcommerce\Refunds\Models\Refund;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -174,7 +175,13 @@ final class RefundPayment
     private function finalizeRefundAttempt(Payment $payment, Refund $refund, PaymentAttempt $attempt, RefundResult $result): Refund
     {
         if ($result->status === RefundStatus::Pending) {
-            $refund->update([
+            $lockedRefund = Refund::query()->lockForUpdate()->findOrFail($refund->id);
+
+            if ($lockedRefund->status === RefundStatus::Succeeded) {
+                return $lockedRefund->fresh();
+            }
+
+            $lockedRefund->update([
                 'status' => RefundStatus::Pending,
                 'external_id' => $result->externalId,
             ]);
@@ -183,13 +190,19 @@ final class RefundPayment
                 'external_id' => $result->externalId,
             ]);
 
-            return $refund->fresh();
+            return $lockedRefund->fresh();
         }
 
         $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
+        $lockedRefund = Refund::query()->lockForUpdate()->findOrFail($refund->id);
+
+        if ($lockedRefund->status === RefundStatus::Succeeded) {
+            return $lockedRefund->fresh();
+        }
+
         if (! $result->success) {
-            $refund->update(['status' => RefundStatus::Failed]);
+            $lockedRefund->update(['status' => RefundStatus::Failed]);
             $attempt->update([
                 'status' => 'failed',
                 'error_code' => $result->failure?->code,
@@ -197,16 +210,16 @@ final class RefundPayment
             ]);
             $this->recalculateOrderPaymentStatus->execute($locked->order);
 
-            return $refund->fresh();
+            return $lockedRefund->fresh();
         }
 
         $refundable = $locked->captured_minor - $locked->refunded_minor - (int) Refund::query()
             ->where('payment_id', $locked->id)
             ->where('status', RefundStatus::Pending)
-            ->where('id', '!=', $refund->id)
+            ->where('id', '!=', $lockedRefund->id)
             ->sum('amount_minor');
         if ($result->amount->minorAmount > $refundable) {
-            $refund->update(['status' => RefundStatus::Failed]);
+            $lockedRefund->update(['status' => RefundStatus::Failed]);
             $attempt->update([
                 'status' => 'failed',
                 'error_code' => 'refund_exceeds_balance',
@@ -214,20 +227,34 @@ final class RefundPayment
             ]);
             $this->recalculateOrderPaymentStatus->execute($locked->order);
 
-            return $refund->fresh();
+            return $lockedRefund->fresh();
         }
 
-        PaymentTransaction::query()->create([
-            'payment_id' => $locked->id,
-            'attempt_id' => $attempt->id,
-            'type' => PaymentTransactionType::Refund,
-            'amount_minor' => $result->amount->minorAmount,
-            'currency' => $result->amount->currency,
-            'external_id' => $result->externalId,
-            'status' => 'succeeded',
-            'processed_at' => $this->clock->now(),
-            'metadata' => $result->metadata,
-        ]);
+        $existingTransaction = $result->externalId !== null
+            ? PaymentTransaction::query()
+                ->where('payment_id', $locked->id)
+                ->where('type', PaymentTransactionType::Refund)
+                ->where('external_id', $result->externalId)
+                ->exists()
+            : false;
+
+        if (! $existingTransaction) {
+            try {
+                PaymentTransaction::query()->create([
+                    'payment_id' => $locked->id,
+                    'attempt_id' => $attempt->id,
+                    'type' => PaymentTransactionType::Refund,
+                    'amount_minor' => $result->amount->minorAmount,
+                    'currency' => $result->amount->currency,
+                    'external_id' => $result->externalId,
+                    'status' => 'succeeded',
+                    'processed_at' => $this->clock->now(),
+                    'metadata' => $result->metadata,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // Concurrent webhook already recorded this refund transaction; re-sync from ledger.
+            }
+        }
 
         $refundedMinor = (int) PaymentTransaction::query()
             ->where('payment_id', $locked->id)
@@ -247,21 +274,21 @@ final class RefundPayment
         $order = $locked->order;
         $order->update(['refunded_total_minor' => $refundedMinor]);
 
-        $refund->update([
+        $lockedRefund->update([
             'status' => RefundStatus::Succeeded,
             'external_id' => $result->externalId,
         ]);
         $attempt->update(['status' => 'succeeded', 'external_id' => $result->externalId]);
 
         $this->dispatchCommerceWebhook('refund.created', [
-            'refund_id' => $refund->public_id,
+            'refund_id' => $lockedRefund->public_id,
             'order_id' => $order->public_id,
-            'amount_minor' => $refund->amount_minor,
+            'amount_minor' => $lockedRefund->amount_minor,
         ]);
 
         $this->recalculateOrderPaymentStatus->execute($order);
 
-        return $refund->fresh();
+        return $lockedRefund->fresh();
     }
 
     public function retryUnknown(PaymentAttempt $attempt): Refund

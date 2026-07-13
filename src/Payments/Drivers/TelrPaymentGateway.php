@@ -13,6 +13,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
@@ -84,6 +85,11 @@ final class TelrPaymentGateway implements PaymentGateway
     public function capture(CapturePaymentData $data): PaymentResult
     {
         throw PaymentOperationNotSupported::for('telr', 'capture');
+    }
+
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        throw PaymentOperationNotSupported::for('telr', 'void');
     }
 
     public function refund(RefundPaymentData $data): RefundResult

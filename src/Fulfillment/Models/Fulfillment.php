@@ -18,6 +18,7 @@ class Fulfillment extends CommerceModel
         'order_id',
         'order_item_id',
         'quantity',
+        'idempotency_key',
         'metadata',
     ];
 

@@ -10,6 +10,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 
 interface PaymentGateway
@@ -19,6 +20,8 @@ interface PaymentGateway
     public function createSession(CreatePaymentSessionData $data): PaymentSessionResult;
 
     public function capture(CapturePaymentData $data): PaymentResult;
+
+    public function void(VoidPaymentData $data): PaymentResult;
 
     public function refund(RefundPaymentData $data): RefundResult;
 

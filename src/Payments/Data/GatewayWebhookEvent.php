@@ -13,6 +13,7 @@ final readonly class GatewayWebhookEvent
         public ?int $amountMinor = null,
         public ?string $currency = null,
         public array $metadata = [],
+        public ?string $providerStatus = null,
     ) {
     }
 }

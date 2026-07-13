@@ -3,6 +3,7 @@
 namespace EzEcommerce\Orders;
 
 use EzEcommerce\Fulfillment\Actions\CreateFulfillment;
+use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Actions\RecalculateOrderFulfillmentStatus;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Orders\Models\Order;
@@ -27,9 +28,11 @@ final class OrderManager
         return $this->recalculateOrderFulfillmentStatus->execute($order);
     }
 
-    public function fulfill(Order $order, OrderItem $item, int $quantity): void
+    public function fulfill(Order $order, OrderItem $item, int $quantity, ?string $idempotencyKey = null): Fulfillment
     {
-        $this->createFulfillment->execute($order, $item, $quantity);
+        $fulfillment = $this->createFulfillment->execute($order, $item, $quantity, $idempotencyKey);
         $this->recalculateOrderFulfillmentStatus->execute($order);
+
+        return $fulfillment;
     }
 }

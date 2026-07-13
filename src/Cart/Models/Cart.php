@@ -2,12 +2,12 @@
 
 namespace EzEcommerce\Cart\Models;
 
+use ArrayObject;
 use EzEcommerce\Core\Enums\CartStatus;
 use EzEcommerce\Core\Models\CommerceModel;
 use EzEcommerce\Customers\Models\Customer;
 use EzEcommerce\Inventory\Models\InventoryReservation;
 use EzEcommerce\Orders\Models\Order;
-use ArrayObject;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;

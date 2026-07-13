@@ -318,6 +318,8 @@ it('reads order fulfillments refunds and payments', function () {
 });
 
 it('uses price list from cart calculate', function () {
+    config()->set('ez-ecommerce.pricing.allowed_price_list_codes', ['wholesale']);
+
     ['variant' => $variant] = $this->createProductWithVariant(priceMinor: 10000, stock: 5);
     $list = PriceList::query()->create(['name' => 'Wholesale', 'code' => 'wholesale', 'currency' => 'AED']);
 

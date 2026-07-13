@@ -2,6 +2,7 @@
 
 namespace EzEcommerce\Orders\Actions;
 
+use EzEcommerce\Core\Enums\FulfillmentStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\TransitionDimension;
 use EzEcommerce\Orders\Models\Order;
@@ -26,6 +27,18 @@ final class CompleteOrder
 
         if (! in_array($order->status, [OrderStatus::Confirmed, OrderStatus::Processing], true)) {
             throw new RuntimeException('Only confirmed or processing orders can be completed.');
+        }
+
+        if ($order->fulfillment_status === FulfillmentStatus::PartiallyFulfilled) {
+            throw new RuntimeException('Partially fulfilled orders cannot be completed.');
+        }
+
+        // ponytail: Default requires fulfillment because the package treats all order items as
+        // fulfillable (no digital/shippable flag on orders). Hosts with digital/pickup flows set
+        // ez-ecommerce.orders.require_fulfillment_for_completion=false.
+        if ($order->fulfillment_status !== FulfillmentStatus::Fulfilled
+            && config('ez-ecommerce.orders.require_fulfillment_for_completion', true)) {
+            throw new RuntimeException('Order must be fulfilled before completion.');
         }
 
         $from = $order->status->value;

@@ -11,7 +11,6 @@ use EzEcommerce\Api\Http\Resources\RefundResource;
 use EzEcommerce\Core\Idempotency\IdempotencyStore;
 use EzEcommerce\Core\Money\Money;
 use EzEcommerce\Core\Support\CanonicalJson;
-use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Actions\CancelOrder;
 use EzEcommerce\Orders\Actions\CompleteOrder;
 use EzEcommerce\Orders\Models\Order;
@@ -165,19 +164,18 @@ final class OrderController extends Controller
             'order_fulfill',
             $idempotencyKey,
             $requestHash,
-            function () use ($order, $validated): array {
+            function () use ($order, $validated, $idempotencyKey): array {
                 $item = OrderItem::query()
                     ->where('order_id', $order->id)
                     ->where('id', $validated['order_item_id'])
                     ->firstOrFail();
 
-                $this->orderManager->fulfill($order, $item, $validated['quantity']);
-
-                $fulfillment = Fulfillment::query()
-                    ->where('order_id', $order->id)
-                    ->where('order_item_id', $item->id)
-                    ->latest()
-                    ->firstOrFail();
+                $fulfillment = $this->orderManager->fulfill(
+                    $order,
+                    $item,
+                    $validated['quantity'],
+                    "order_fulfill:{$idempotencyKey}",
+                );
 
                 return [
                     'resource_type' => 'fulfillment',

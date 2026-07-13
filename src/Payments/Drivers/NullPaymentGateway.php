@@ -12,6 +12,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use InvalidArgumentException;
@@ -50,6 +51,11 @@ final class NullPaymentGateway implements PaymentGateway
             amount: $data->amount,
             externalId: 'null_capture_'.$data->payment->public_id,
         );
+    }
+
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        throw PaymentOperationNotSupported::for('null', 'void');
     }
 
     public function refund(RefundPaymentData $data): RefundResult

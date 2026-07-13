@@ -9,7 +9,7 @@
 
 **ez-ecommerce** is a headless Laravel commerce **engine** (not a storefront). It owns:
 
-- `commerce_*` database tables and migrations (50 files)
+- `commerce_*` database tables and migrations (52 files)
 - Cart → checkout → order → payment → fulfillment → refund → return flows
 - Inventory reservations with signed movements
 - Versioned REST API at `api/ez-commerce/v1`
@@ -24,7 +24,22 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 
 ## Sprint status (current)
 
-### Shipped (production hardening sprint)
+### Shipped (payment lifecycle hardening sprint)
+
+| Area | What landed |
+|------|-------------|
+| **Authorization** | Stripe `payment_intent.amount_capturable_updated` reconciliation → `PaymentStatus::Authorized` + Authorization transaction; reservation expiry now protects authorized payments |
+| **Voiding** | `PaymentGateway::void()` contract + `void` capability flag; `VoidPaymentAuthorization` action; Stripe cancels PaymentIntent on void; `CancelOrder` voids authorized payments before release |
+| **Refund state mapping** | Stripe `refund.updated` branches on provider status (succeeded/pending/failed/canceled) instead of assuming success; PayPal `refund()` maps `PENDING`/`COMPLETED`/`FAILED`; PayPal `parseWebhook` exposes refund refs + status; `PAYMENT.REFUND.PENDING` supported |
+| **Refund ledger idempotency** | `UNIQUE(payment_id, type, external_id)` on `commerce_payment_transactions`; `finalizeRefundAttempt` locks refund row, reloads status, checks existing external transaction before insert; unique-violation recovery re-syncs from ledger |
+| **OrderPaid recovery** | `completeOrderAfterCapture` uses `order_paid_dispatched` metadata guard as sole source of truth (removed `wasFullyCaptured` param); recovery finalization now dispatches `OrderPaid` when it was never dispatched |
+| **Price-list eligibility** | `DefaultPriceListEligibility` fail-closed by default — empty `pricing.allowed_price_list_codes` rejects client-selected price lists; hosts opt in via config |
+| **Fulfillment idempotency** | `idempotency_key` column + unique constraint on `commerce_fulfillments`; `CreateFulfillment` accepts key, stores it, recovers existing on unique violation; `OrderManager::fulfill` + `OrderController` thread the key |
+| **Webhook conflict recovery** | `InboundWebhookConflictException` on duplicate unique violation; `ReconcilePayment`/`ReconcileRefund` reload inbox record and throw unless `processed`; controller maps to 409 |
+| **Order policies** | `CompleteOrder` blocks `PartiallyFulfilled` + requires `Fulfilled` unless `orders.require_fulfillment_for_completion=false`; `CancelOrder` blocks `PartiallyFulfilled` + voids authorized payments before release |
+| **Tests** | 118 Pest tests across 14 feature files (16 new payment lifecycle tests) |
+
+### Shipped (previous hardening sprint)
 
 | Area | What landed |
 |------|-------------|
@@ -34,7 +49,6 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Cart** | Atomic `version` bumps on mutations; 409/422 API conflict mapping |
 | **Webhooks** | Outbound delivery throws on non-2xx (queue retries); `ReconcileRefund` for async PSP refunds |
 | **CI** | PostgreSQL hardening job (`pest --group=hardening`) |
-| **Tests** | 102 Pest tests across 13 feature files |
 
 ### Shipped (earlier sprints)
 
@@ -57,6 +71,8 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 - Catalog update/delete API
 - Automated PSP payout transfers (payout records commissions as paid)
 - `currency.rounding` config (unused)
+- PayPal pending capture (`PAYMENT.CAPTURE.PENDING`) — async capture pending state not yet reconciled; Stripe/PayPal sandbox contract tests (deferred — need live credentials)
+- Real multi-process concurrency tests (deferred — need real DB + worker harness)
 
 ---
 

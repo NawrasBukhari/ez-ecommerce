@@ -17,8 +17,10 @@ final class DefaultPriceListEligibility implements PriceListEligibility
 
         $allowedCodes = config('ez-ecommerce.pricing.allowed_price_list_codes', []);
 
+        // ponytail: Fail-closed default — no configured pricing.allowed_price_list_codes rejects
+        // all client-selected price lists. Hosts opt in specific lists via that config.
         if ($allowedCodes === [] || $allowedCodes === null) {
-            return true;
+            return false;
         }
 
         $code = $priceList->code ?? null;

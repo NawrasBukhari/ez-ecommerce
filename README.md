@@ -187,10 +187,10 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 | Checkout transaction design | 8/10 |
 | Manual/null payments | 8.5/10 |
 | Headless REST API | 7/10 |
-| Stripe integration | 5.5/10 |
-| PayPal integration | 6/10 |
+| Stripe integration | 6.5/10 |
+| PayPal integration | 6.5/10 |
 | Telr integration | 5.5/10 |
-| Tests and CI | 5/10 |
+| Tests and CI | 6/10 |
 
 ### Classification
 
@@ -198,9 +198,9 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 |------|---------|
 | **Core / manual commerce** | Strong beta |
 | **Inventory + order lifecycle** | Close to production after concurrent tests |
-| **REST storefront checkout** | Functional — missing policy + address-aware quoting |
-| **Stripe** | Not production-ready (refs, partial capture, webhook retries) |
-| **PayPal** | Closer — session retry + async refunds still unsafe |
+| **REST storefront checkout** | Functional — fail-closed price lists, address-aware quoting |
+| **Stripe** | Authorization + voiding supported; refund state mapping fixed; manual capture safe |
+| **PayPal** | Refund state mapping fixed (PENDING/COMPLETED/FAILED); pending capture still open |
 | **Telr** | Safer sessions/refunds — capability enforcement improving |
 
 Before treating payments as production-ready:
@@ -209,7 +209,19 @@ Before treating payments as production-ready:
 2. Configure real webhook secrets and API tokens (never `COMMERCE_API_ALLOW_UNAUTHENTICATED=true` in prod).
 3. Exercise operator commands for your PSP (`commerce:reconcile-*`). Think of them as commerce therapy for when the network blinks mid-capture.
 
-### Recently fixed (hardening sprint)
+### Recently fixed (payment lifecycle hardening sprint)
+
+- **Stripe authorization reconciliation** — `payment_intent.amount_capturable_updated` → `PaymentStatus::Authorized` + Authorization transaction
+- **Provider voiding** — `PaymentGateway::void()` contract; `VoidPaymentAuthorization` action; Stripe cancels PaymentIntent; `CancelOrder` voids before release
+- **Stripe/PayPal refund state mapping** — `refund.updated` branches on provider status (succeeded/pending/failed/canceled); PayPal maps PENDING/COMPLETED/FAILED; `PAYMENT.REFUND.PENDING` supported
+- **Refund ledger idempotency** — `UNIQUE(payment_id, type, external_id)` on transactions; `finalizeRefundAttempt` locks refund, checks existing external transaction before insert
+- **OrderPaid recovery** — metadata guard as sole source of truth; recovery dispatches `OrderPaid` when it was never dispatched
+- **Price-list fail-closed** — empty `pricing.allowed_price_list_codes` rejects client-selected price lists
+- **Fulfillment durable idempotency** — `idempotency_key` column + unique on fulfillments; `CreateFulfillment` recovers on unique violation
+- **Webhook conflict recovery** — `InboundWebhookConflictException` (409) on duplicate unique violation instead of blind ack
+- **Order policy hardening** — `CompleteOrder` blocks PartiallyFulfilled + requires Fulfilled (config escape hatch); `CancelOrder` blocks PartiallyFulfilled
+
+### Recently fixed (previous hardening sprint)
 
 - Webhook DTO: `eventId` / `paymentReference` / `transactionReference`
 - PayPal: `CHECKOUT.ORDER.APPROVED` no longer treated as captured
@@ -248,8 +260,8 @@ Most sprint blockers from the `8f5633a8` review are now addressed in code. Remai
 |------|--------|-------|
 | **Manual / null checkout** | Strong beta | Idempotent checkout, inventory, capture, fulfill, refund, reconciliation |
 | **Headless REST API** | Beta | Full surface; scoped tokens; guest + admin auth |
-| **Stripe** | Integration prototype | Manual capture; ledger uses `ch_*` — verify before live money |
-| **PayPal** | Integration prototype | Order capture; `PAYPAL_WEBHOOK_ID` for native verify |
+| **Stripe** | Integration prototype | Manual capture; authorization + voiding; refund state mapping; ledger uses `ch_*` — verify before live money |
+| **PayPal** | Integration prototype | Order capture; refund state mapping (PENDING/COMPLETED/FAILED); pending capture still open; `PAYPAL_WEBHOOK_ID` for native verify |
 | **Telr** | Sessions + refunds only | No capture; attempts rejected before PSP call |
 
 ---
@@ -307,6 +319,7 @@ The honest "please don't `@` me on GitHub about this" list:
 - **Multi-process concurrency tests** — cart `version` bumps are atomic; true multi-process CI still open
 - **`currency.rounding` config** — defined, unused. Schrödinger's setting.
 - **PayPal `CHECKOUT.ORDER.APPROVED`** — no server-side capture trigger yet
+- **PayPal pending capture** — `PAYMENT.CAPTURE.PENDING` async capture pending state not reconciled
 
 `OrderManager::fulfill()` is **not** on the `EzEcommerce` facade — use DI or the API. We hid fulfill on purpose so you wouldn't one-line your way into shipping unpaid orders. You're welcome. Again.
 
@@ -660,6 +673,8 @@ CI: SQLite/Laravel matrix, MySQL hardening, PostgreSQL hardening (`--group=harde
 2. Multi-process concurrent race tests in CI
 3. Catalog update/delete API
 4. PayPal `CHECKOUT.ORDER.APPROVED` → server-side capture trigger
+5. PayPal pending capture (`PAYMENT.CAPTURE.PENDING`) reconciliation
+5. PayPal `PAYMENT.CAPTURE.PENDING` reconciliation (async capture pending state)
 
 See [`AGENTS.md`](AGENTS.md) for implementation constraints.
 

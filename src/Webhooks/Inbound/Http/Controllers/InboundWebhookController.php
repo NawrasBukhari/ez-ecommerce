@@ -9,6 +9,7 @@ use EzEcommerce\Payments\Drivers\PayPalPaymentGateway;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 use EzEcommerce\Payments\PaymentGatewayRegistry;
+use EzEcommerce\Webhooks\Inbound\Exceptions\InboundWebhookConflictException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -39,9 +40,18 @@ final class InboundWebhookController extends Controller
 
         $parsed = $this->gateways->for($gateway)->parseWebhook($requestData);
 
-        $event = $this->reconcileRefund->isRefundEvent($gateway, $parsed->eventType)
-            ? $this->reconcileRefund->execute($requestData)
-            : $this->reconcilePayment->execute($requestData);
+        try {
+            $event = $this->reconcileRefund->isRefundEvent($gateway, $parsed->eventType)
+                ? $this->reconcileRefund->execute($requestData)
+                : $this->reconcilePayment->execute($requestData);
+        } catch (InboundWebhookConflictException $e) {
+            return response()->json([
+                'received' => true,
+                'event_type' => $parsed->eventType,
+                'external_id' => $parsed->eventId,
+                'status' => $e->durableStatus,
+            ], 409);
+        }
 
         return response()->json([
             'received' => true,

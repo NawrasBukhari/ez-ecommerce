@@ -13,6 +13,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
 
@@ -43,6 +44,11 @@ final class ManualPaymentGateway implements PaymentGateway
             amount: $data->amount,
             externalId: 'manual_capture_'.$data->attempt->public_id,
         );
+    }
+
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        throw PaymentOperationNotSupported::for('manual', 'void');
     }
 
     public function refund(RefundPaymentData $data): RefundResult

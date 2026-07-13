@@ -13,6 +13,7 @@ use EzEcommerce\Payments\Data\PaymentResult;
 use EzEcommerce\Payments\Data\PaymentSessionResult;
 use EzEcommerce\Payments\Data\RefundPaymentData;
 use EzEcommerce\Payments\Data\RefundResult;
+use EzEcommerce\Payments\Data\VoidPaymentData;
 use EzEcommerce\Payments\Data\WebhookRequestData;
 use EzEcommerce\Payments\Exceptions\PaymentDriverNotInstalled;
 use EzEcommerce\Payments\Exceptions\PaymentOperationNotSupported;
@@ -105,6 +106,11 @@ final class PayPalPaymentGateway implements PaymentGateway
         );
     }
 
+    public function void(VoidPaymentData $data): PaymentResult
+    {
+        throw PaymentOperationNotSupported::for('paypal', 'void');
+    }
+
     public function refund(RefundPaymentData $data): RefundResult
     {
         $captureId = $data->providerReference ?? $data->attempt->external_id ?? ($data->payment->metadata['paypal_capture_id'] ?? null);
@@ -125,9 +131,18 @@ final class PayPalPaymentGateway implements PaymentGateway
 
         $body = $response->json();
 
+        // ponytail: PayPal amounts assume two-decimal currencies via /100 and number_format(...,2).
+        // Ceiling: zero-decimal (JPY) and three-decimal (KWD) currencies break here.
+        // Upgrade: add currency exponent metadata to the gateway layer and use bcmath for string-safe conversion.
+        $status = (string) ($body['status'] ?? '');
+
         return new RefundResult(
-            success: ($body['status'] ?? '') === 'COMPLETED',
-            status: RefundStatus::Succeeded,
+            success: in_array($status, ['COMPLETED', 'PENDING'], true),
+            status: match ($status) {
+                'COMPLETED' => RefundStatus::Succeeded,
+                'PENDING' => RefundStatus::Pending,
+                default => RefundStatus::Failed,
+            },
             amount: $data->amount,
             externalId: $body['id'] ?? null,
         );
@@ -144,15 +159,21 @@ final class PayPalPaymentGateway implements PaymentGateway
             ?? $payload['resource']['purchase_units'][0]['reference_id']
             ?? null;
 
-        if ($eventType === 'PAYMENT.CAPTURE.COMPLETED' || $eventType === 'PAYMENT.SALE.COMPLETED') {
+        $transactionReference = null;
+        $providerStatus = null;
+        if (in_array($eventType, ['PAYMENT.CAPTURE.COMPLETED', 'PAYMENT.SALE.COMPLETED'], true)) {
             $transactionReference = $resource['id'] ?? null;
-        } else {
-            $transactionReference = null;
+        } elseif (str_starts_with($eventType, 'PAYMENT.REFUND')) {
+            $transactionReference = $resource['id'] ?? null;
+            $providerStatus = is_string($resource['status'] ?? null) ? (string) $resource['status'] : null;
         }
 
         $amountMinor = null;
         $currency = null;
         if (isset($resource['amount']['value'], $resource['amount']['currency_code'])) {
+            // ponytail: webhook amounts parsed as float * 100; breaks zero/three-decimal currencies.
+            // Ceiling: same as refund() — currency exponent metadata needed.
+            // Upgrade: add exponent-aware string decimal parsing in the gateway layer.
             $amountMinor = (int) round((float) $resource['amount']['value'] * 100);
             $currency = strtoupper((string) $resource['amount']['currency_code']);
         }
@@ -164,6 +185,7 @@ final class PayPalPaymentGateway implements PaymentGateway
             transactionReference: is_string($transactionReference) ? $transactionReference : null,
             amountMinor: $amountMinor,
             currency: $currency,
+            providerStatus: $providerStatus,
         );
     }
 
