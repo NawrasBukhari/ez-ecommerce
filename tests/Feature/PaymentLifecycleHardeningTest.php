@@ -346,11 +346,13 @@ it('recovered order paid dispatches OrderPaid exactly once', function () {
     Event::assertDispatched(OrderPaid::class);
 
     $order = $result->order->fresh();
-    $metadata = $order->metadata instanceof \ArrayObject
-        ? $order->metadata->getArrayCopy()
-        : (array) ($order->metadata ?? []);
 
-    expect($metadata['order_paid_dispatched'] ?? false)->toBeTrue();
+    // Exactly-once is now enforced by a unique outbox row keyed on order.paid:{order_id}.
+    $outboxCount = \EzEcommerce\Core\Models\OutboxMessage::query()
+        ->where('event', 'order.paid')
+        ->where('key', 'order.paid:'.$order->id)
+        ->count();
+    expect($outboxCount)->toBe(1);
 
     // Recovery path should NOT dispatch again
     app(\EzEcommerce\Payments\Actions\FinalizeAcceptedPayment::class)

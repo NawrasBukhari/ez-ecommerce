@@ -30,11 +30,17 @@ final class VoidPaymentAuthorization
 
     public function execute(Payment $payment, string $idempotencyKey = ''): Payment
     {
-        $attempt = DB::transaction(function () use ($payment, $idempotencyKey) {
+        $voidableStates = [
+            PaymentStatus::Authorized,
+            PaymentStatus::RequiresAction,
+            PaymentStatus::Pending,
+        ];
+
+        $attempt = DB::transaction(function () use ($payment, $idempotencyKey, $voidableStates) {
             $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
-            if ($locked->status !== PaymentStatus::Authorized) {
-                throw new RuntimeException('Only authorized payments can be voided.');
+            if (! in_array($locked->status, $voidableStates, true)) {
+                throw new RuntimeException('Only authorized, pending, or requires-action payments can be voided.');
             }
 
             $gateway = $this->gateways->for($locked->gateway);
@@ -84,14 +90,16 @@ final class VoidPaymentAuthorization
 
         if (! $result->success) {
             $failure = $result->failure;
+            $errorCode = $failure !== null ? $failure->code : 'void_failed';
+            $errorMessage = $failure !== null ? $failure->message : 'The payment authorization could not be voided.';
             $attempt->update([
                 'status' => 'failed',
-                'error_code' => $failure->code,
-                'error_message' => $failure->message,
+                'error_code' => $errorCode,
+                'error_message' => $errorMessage,
             ]);
             $this->recalculateOrderPaymentStatus->execute($payment->order);
 
-            throw new RuntimeException('Void failed: '.$failure->message);
+            throw new RuntimeException('Void failed: '.$errorMessage);
         }
 
         $payment = DB::transaction(function () use ($payment, $attempt, $result) {

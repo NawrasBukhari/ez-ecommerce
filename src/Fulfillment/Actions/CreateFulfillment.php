@@ -2,6 +2,7 @@
 
 namespace EzEcommerce\Fulfillment\Actions;
 
+use EzEcommerce\Core\Exceptions\IdempotencyPayloadMismatchException;
 use EzEcommerce\Fulfillment\Contracts\FulfillmentReleasePolicy;
 use EzEcommerce\Fulfillment\Models\Fulfillment;
 use EzEcommerce\Orders\Actions\RecalculateOrderFulfillmentStatus;
@@ -32,45 +33,61 @@ final class CreateFulfillment
         if ($idempotencyKey !== null && $idempotencyKey !== '') {
             $existing = Fulfillment::query()->where('idempotency_key', $idempotencyKey)->first();
             if ($existing !== null) {
+                $this->assertPayloadMatches($existing, $order, $item, $quantity);
+
                 return $existing;
             }
         }
 
-        return DB::transaction(function () use ($order, $item, $quantity, $idempotencyKey) {
-            $lockedItem = OrderItem::query()
-                ->where('id', $item->id)
-                ->where('order_id', $order->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $alreadyFulfilled = (int) Fulfillment::query()
-                ->where('order_item_id', $lockedItem->id)
-                ->sum('quantity');
-
-            $remaining = $lockedItem->quantity - $alreadyFulfilled;
-            if ($quantity > $remaining) {
-                throw new RuntimeException("Cannot fulfill {$quantity}; only {$remaining} remaining.");
-            }
-
-            try {
-                $fulfillment = Fulfillment::query()->create([
-                    'order_id' => $order->id,
-                    'order_item_id' => $lockedItem->id,
-                    'quantity' => $quantity,
-                    'idempotency_key' => $idempotencyKey,
-                ]);
-            } catch (UniqueConstraintViolationException $e) {
-                $existing = Fulfillment::query()->where('idempotency_key', $idempotencyKey)->first();
-                if ($existing !== null) {
-                    return $existing;
-                }
-
+        try {
+            return DB::transaction(fn () => $this->create($order, $item, $quantity, $idempotencyKey));
+        } catch (UniqueConstraintViolationException $e) {
+            if ($idempotencyKey === null || $idempotencyKey === '') {
                 throw $e;
             }
 
-            $this->recalculateOrderFulfillmentStatus->execute($order);
+            $existing = Fulfillment::query()->where('idempotency_key', $idempotencyKey)->firstOrFail();
+            $this->assertPayloadMatches($existing, $order, $item, $quantity);
 
-            return $fulfillment;
-        });
+            return $existing;
+        }
+    }
+
+    private function create(Order $order, OrderItem $item, int $quantity, ?string $idempotencyKey): Fulfillment
+    {
+        $lockedItem = OrderItem::query()
+            ->where('id', $item->id)
+            ->where('order_id', $order->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        $alreadyFulfilled = (int) Fulfillment::query()
+            ->where('order_item_id', $lockedItem->id)
+            ->sum('quantity');
+
+        $remaining = $lockedItem->quantity - $alreadyFulfilled;
+        if ($quantity > $remaining) {
+            throw new RuntimeException("Cannot fulfill {$quantity}; only {$remaining} remaining.");
+        }
+
+        $fulfillment = Fulfillment::query()->create([
+            'order_id' => $order->id,
+            'order_item_id' => $lockedItem->id,
+            'quantity' => $quantity,
+            'idempotency_key' => $idempotencyKey,
+        ]);
+
+        $this->recalculateOrderFulfillmentStatus->execute($order);
+
+        return $fulfillment;
+    }
+
+    private function assertPayloadMatches(Fulfillment $existing, Order $order, OrderItem $item, int $quantity): void
+    {
+        if ((int) $existing->order_id !== (int) $order->id
+            || (int) $existing->order_item_id !== (int) $item->id
+            || (int) $existing->quantity !== $quantity) {
+            throw IdempotencyPayloadMismatchException::for('fulfillment', (string) $existing->idempotency_key);
+        }
     }
 }

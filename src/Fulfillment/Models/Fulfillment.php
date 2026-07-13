@@ -8,6 +8,13 @@ use EzEcommerce\Orders\Models\OrderItem;
 use Illuminate\Database\Eloquent\Casts\AsArrayObject;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $order_id
+ * @property int $order_item_id
+ * @property int $quantity
+ * @property string $public_id
+ * @property string|null $idempotency_key
+ */
 class Fulfillment extends CommerceModel
 {
     protected static bool $usesPublicId = true;

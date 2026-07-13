@@ -33,7 +33,6 @@ final class ReconcileRefund
             ], true),
             'paypal' => in_array($eventType, [
                 'PAYMENT.CAPTURE.REFUNDED',
-                'PAYMENT.REFUND.COMPLETED',
                 'PAYMENT.REFUND.FAILED',
                 'PAYMENT.REFUND.PENDING',
             ], true),
@@ -56,41 +55,21 @@ final class ReconcileRefund
             ->where('external_event_id', $event->eventId)
             ->first();
 
-        if ($existing !== null && $existing->status === 'processed') {
-            return $event;
-        }
-
-        $attempt = $this->findRefundAttempt($event);
-        if ($attempt === null) {
-            return $event;
-        }
-
-        $refundId = $this->attemptMetadata($attempt)['refund_id'] ?? null;
-        if ($refundId === null) {
-            return $event;
-        }
-
-        $refund = Refund::query()->find((int) $refundId);
-        if ($refund === null) {
-            return $event;
-        }
-
-        $payment = $attempt->payment;
-        if ($payment === null) {
+        if ($existing !== null && in_array($existing->status, ['processed', 'unmatched'], true)) {
             return $event;
         }
 
         $providerStatus = $event->providerStatus;
 
         try {
-            DB::transaction(function () use ($request, $event, $attempt, $refund, $payment, $providerStatus) {
+            DB::transaction(function () use ($request, $event, $providerStatus) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
                     ->where('external_event_id', $event->eventId)
                     ->lockForUpdate()
                     ->first();
 
-                if ($record !== null && $record->status === 'processed') {
+                if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
                     return;
                 }
 
@@ -107,7 +86,41 @@ final class ReconcileRefund
                     $record->update(['status' => 'processing']);
                 }
 
+                $attempt = $this->findRefundAttempt($event);
+                if ($attempt === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
+                $refundId = $this->attemptMetadata($attempt)['refund_id'] ?? null;
+                if ($refundId === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
+                $refund = Refund::query()->find((int) $refundId);
+                if ($refund === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
+                $payment = $attempt->payment;
+                if ($payment === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
                 $outcome = $this->classifyRefundOutcome($request->gateway, $event->eventType, $providerStatus);
+
+                if ($outcome === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
 
                 if ($outcome === 'succeeded') {
                     if ($refund->status === RefundStatus::Succeeded) {
@@ -148,7 +161,7 @@ final class ReconcileRefund
                 ->where('external_event_id', $event->eventId)
                 ->first();
 
-            if ($record !== null && $record->status === 'processed') {
+            if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
                 return $event;
             }
 
@@ -203,7 +216,7 @@ final class ReconcileRefund
 
         if ($gateway === 'paypal') {
             return match ($eventType) {
-                'PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.REFUND.COMPLETED' => 'succeeded',
+                'PAYMENT.CAPTURE.REFUNDED' => 'succeeded',
                 'PAYMENT.REFUND.PENDING' => 'pending',
                 'PAYMENT.REFUND.FAILED' => 'failed',
                 default => null,

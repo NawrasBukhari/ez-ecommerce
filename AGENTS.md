@@ -9,7 +9,7 @@
 
 **ez-ecommerce** is a headless Laravel commerce **engine** (not a storefront). It owns:
 
-- `commerce_*` database tables and migrations (52 files)
+- `commerce_*` database tables and migrations (53 files)
 - Cart → checkout → order → payment → fulfillment → refund → return flows
 - Inventory reservations with signed movements
 - Versioned REST API at `api/ez-commerce/v1`
@@ -23,6 +23,25 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 ---
 
 ## Sprint status (current)
+
+### Shipped (PSP lifecycle sprint 3)
+
+| Area | What landed |
+|------|-------------|
+| **Stripe void args** | `cancel($id, [], $opts)` — idempotency options in the third argument, not as a cancellation parameter |
+| **Nullable void failure** | `VoidPaymentAuthorization` handles `failure === null` without a fatal error |
+| **Monotonic authorization** | Auth webhooks only transition from `{Created, Pending, RequiresAction}`; never regress terminal states or reactivate cancelled orders |
+| **Stripe partial capture** | `charge.captured` reads `amount_captured` (actual captured), not `amount` (intended) |
+| **Active session cancel** | `CancelOrder` voids `RequiresAction`/`Pending`/`Authorized` payments; skips non-void gateways |
+| **PayPal refund correlation** | `PAYMENT.CAPTURE.REFUNDED` parsed as refund event with `resource.id`; removed non-existent `PAYMENT.REFUND.COMPLETED` |
+| **Fulfillment recovery** | `UniqueConstraintViolationException` caught outside `DB::transaction` (PG-safe); payload-fingerprint mismatch rejected |
+| **Unmatched webhook persistence** | `ReconcileRefund`/`ReconcilePayment` persist `unmatched` before correlation; unknown provider statuses no longer marked `processed` |
+| **Void reconciliation** | `ReconcileVoidAttempt` action + `commerce:reconcile-voids` command |
+| **OrderPaid outbox** | Unique outbox row keyed `order.paid:{order_id}` replaces metadata flag; exactly-once under concurrency + crash recovery |
+| **Failure webhooks** | Stripe `payment_intent.payment_failed`/`canceled` and PayPal `PAYMENT.CAPTURE.DENIED` → `PaymentStatus::Failed` |
+| **Cancel/complete locking** | Both actions `lockForUpdate` the order row before transitioning |
+| **Config + commands** | `orders.require_fulfillment_for_completion` published; `commerce:dedupe-transactions` for upgrade preflight |
+| **Tests** | 130 Pest tests across 15 feature files (12 new PSP lifecycle tests) |
 
 ### Shipped (payment lifecycle hardening sprint)
 
@@ -63,7 +82,7 @@ Commands: `commerce:*` (never `commerce:migrate` — host runs `php artisan migr
 | **Cart** | Expiry enforcement, `price_list_id` on calculate/checkout |
 | **Shipping/Tax** | `GET /shipping-methods`, weight shipping + jurisdiction tax drivers |
 | **Webhooks** | Delivery retry, more outbound events, inbound event log API |
-| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records`, `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations` |
+| **Commands** | `commerce:purge-expired-carts`, `commerce:purge-idempotency-records`, `commerce:reconcile-payments`, `commerce:reconcile-refunds`, `commerce:reconcile-finalizations`, `commerce:reconcile-voids`, `commerce:dedupe-transactions` |
 
 ### Still not built (do not assume)
 

@@ -163,7 +163,9 @@ final class PayPalPaymentGateway implements PaymentGateway
         $providerStatus = null;
         if (in_array($eventType, ['PAYMENT.CAPTURE.COMPLETED', 'PAYMENT.SALE.COMPLETED'], true)) {
             $transactionReference = $resource['id'] ?? null;
-        } elseif (str_starts_with($eventType, 'PAYMENT.REFUND')) {
+        } elseif ($eventType === 'PAYMENT.CAPTURE.REFUNDED' || str_starts_with($eventType, 'PAYMENT.REFUND')) {
+            // PAYMENT.CAPTURE.REFUNDED is PayPal's documented refund-success event; its resource
+            // is the refund object, so resource.id is the refund id we correlated against.
             $transactionReference = $resource['id'] ?? null;
             $providerStatus = is_string($resource['status'] ?? null) ? (string) $resource['status'] : null;
         }

@@ -119,6 +119,7 @@ final class StripePaymentGateway implements PaymentGateway
 
         $cancelled = $this->client->paymentIntents->cancel(
             $intentId,
+            [],
             $this->idempotencyOptions($data->attempt->idempotency_key, "void:{$data->attempt->id}"),
         );
 
@@ -190,7 +191,13 @@ final class StripePaymentGateway implements PaymentGateway
 
         $amountMinor = match ($type) {
             'payment_intent.amount_capturable_updated' => isset($object['amount_capturable']) ? (int) $object['amount_capturable'] : null,
-            'charge.refunded', 'refund.updated' => isset($object['amount']) ? (int) $object['amount'] : null,
+            'charge.captured' => isset($object['amount_captured'])
+                ? (int) $object['amount_captured']
+                : (isset($object['amount']) ? (int) $object['amount'] : null),
+            'charge.refunded' => isset($object['amount'])
+                ? (int) $object['amount']
+                : (isset($object['amount_refunded']) ? (int) $object['amount_refunded'] : null),
+            'refund.updated' => isset($object['amount']) ? (int) $object['amount'] : null,
             default => isset($object['amount']) ? (int) $object['amount'] : null,
         };
 

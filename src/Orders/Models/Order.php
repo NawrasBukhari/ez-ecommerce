@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property OrderStatus $status
  * @property OrderPaymentStatus $payment_status
  * @property FulfillmentStatus $fulfillment_status
+ * @property string $public_id
  * @property ArrayObject<int|string, mixed>|null $metadata
  * @property-read Customer|null $customer
  */

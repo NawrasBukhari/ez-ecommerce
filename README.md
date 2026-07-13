@@ -177,8 +177,8 @@ Guest cart auth is checked **before** any cart mutation (including optional `pri
 
 ## Production readiness
 
-**Overall: 7/10** — strong beta commerce engine; PSP paths still have blockers.  
-*Current head: `8f5633a8` — gateway webhook refs + inventory finalization hardening.*
+**Overall: 7.4/10** — strong beta commerce engine; PSP paths closing fast but still have provider-semantics blockers.  
+*Current head: `606d3b7` — payment lifecycle hardening + PSP semantics fixes.*
 
 | Area | Rating |
 |------|--------|
@@ -209,6 +209,23 @@ Before treating payments as production-ready:
 2. Configure real webhook secrets and API tokens (never `COMMERCE_API_ALLOW_UNAUTHENTICATED=true` in prod).
 3. Exercise operator commands for your PSP (`commerce:reconcile-*`). Think of them as commerce therapy for when the network blinks mid-capture.
 
+### Recently fixed (PSP lifecycle sprint 3)
+
+- **Stripe void argument order** — `cancel($id, [], $opts)` now passes idempotency options in the third argument (request opts), not as a cancellation parameter
+- **Nullable void failure** — `VoidPaymentAuthorization` handles `PaymentResult::$failure === null` without a fatal error
+- **Monotonic authorization** — out-of-order auth webhooks no longer regress `Captured`/`Cancelled`/`Refunded` payments or reactivate cancelled orders
+- **Stripe partial-capture amount** — `charge.captured` webhook reads `amount_captured` (actual captured), not `amount` (intended)
+- **Active session cancellation** — `CancelOrder` voids `RequiresAction`/`Pending` payments (not just `Authorized`) via `VoidPaymentAuthorization`; skips non-void gateways
+- **PayPal refund correlation** — `PAYMENT.CAPTURE.REFUNDED` (PayPal's documented success event) now parsed as a refund event with `resource.id`; removed non-existent `PAYMENT.REFUND.COMPLETED`
+- **Fulfillment recovery outside tx** — `UniqueConstraintViolationException` caught outside `DB::transaction` (PG-safe); payload-fingerprint mismatch rejected via `IdempotencyPayloadMismatchException`
+- **Unmatched webhook persistence** — `ReconcileRefund`/`ReconcilePayment` persist `ProcessedGatewayEvent` as `unmatched` before correlation; unknown provider statuses no longer marked `processed`
+- **Void reconciliation** — `ReconcileVoidAttempt` action + `commerce:reconcile-voids` command; operators can confirm/fail unknown void attempts
+- **OrderPaid exactly-once outbox** — unique outbox row keyed `order.paid:{order_id}` replaces the metadata flag; concurrent finalizers and crash recovery no longer double-dispatch
+- **Provider failure webhooks** — Stripe `payment_intent.payment_failed`/`canceled` and PayPal `PAYMENT.CAPTURE.DENIED` transition payments to `Failed`
+- **Cancel/complete row-locking** — both actions lock the order row before transitioning
+- **Orders config published** — `orders.require_fulfillment_for_completion` now in `config/ez-ecommerce.php`
+- **Dedupe command** — `commerce:dedupe-transactions` cleans duplicate transactions/outbox keys before unique constraints on upgrades
+
 ### Recently fixed (payment lifecycle hardening sprint)
 
 - **Stripe authorization reconciliation** — `payment_intent.amount_capturable_updated` → `PaymentStatus::Authorized` + Authorization transaction
@@ -233,10 +250,12 @@ Before treating payments as production-ready:
 
 ### Remaining production blockers
 
-Most sprint blockers from the `8f5633a8` review are now addressed in code. Remaining gaps before calling PSP paths production-grade:
+Most sprint blockers from the `8f5633a8` review are now addressed in code. The PSP lifecycle sprint 3 closed the Stripe cancel argument order, authorization ordering, partial capture amount, PayPal refund correlation, and PostgreSQL fulfillment recovery. Remaining gaps before calling PSP paths production-grade:
 
 1. **Real PSP contract tests** — gateway drivers tested via fakes/mocks only; no Stripe/PayPal/Telr sandbox CI
 2. **Multi-process race tests** — sequential Pest + row locks; true multi-process CI still open
+3. **PayPal pending capture reconciliation** — `PAYMENT.CAPTURE.PENDING` keeps payments `Pending` but no async completion path
+4. **True outbox dispatcher** — the outbox row is inserted atomically, but a dedicated outbox poller job is still host-side work
 
 ### Recently fixed (latest sprint)
 

@@ -10,6 +10,7 @@ class OutboxMessage extends CommerceModel
 
     protected $fillable = [
         'event',
+        'key',
         'payload',
         'processed_at',
     ];

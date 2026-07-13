@@ -6,6 +6,7 @@ use EzEcommerce\Core\Enums\FulfillmentStatus;
 use EzEcommerce\Core\Enums\OrderStatus;
 use EzEcommerce\Core\Enums\TransitionDimension;
 use EzEcommerce\Orders\Models\Order;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 final class CompleteOrder
@@ -21,6 +22,35 @@ final class CompleteOrder
             return $order;
         }
 
+        $this->assertCompletable($order);
+
+        return DB::transaction(function () use ($order, $reason): Order {
+            $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+
+            if ($locked->status === OrderStatus::Completed) {
+                return $locked;
+            }
+
+            $this->assertCompletable($locked);
+
+            $from = $locked->status->value;
+
+            $locked->update(['status' => OrderStatus::Completed]);
+
+            $this->recordOrderTransition->execute(
+                $locked,
+                TransitionDimension::Commercial,
+                $from,
+                OrderStatus::Completed->value,
+                $reason ?? 'Order completed',
+            );
+
+            return $locked->fresh();
+        });
+    }
+
+    private function assertCompletable(Order $order): void
+    {
         if ($order->status === OrderStatus::Cancelled) {
             throw new RuntimeException('Cancelled orders cannot be completed.');
         }
@@ -40,19 +70,5 @@ final class CompleteOrder
             && config('ez-ecommerce.orders.require_fulfillment_for_completion', true)) {
             throw new RuntimeException('Order must be fulfilled before completion.');
         }
-
-        $from = $order->status->value;
-
-        $order->update(['status' => OrderStatus::Completed]);
-
-        $this->recordOrderTransition->execute(
-            $order,
-            TransitionDimension::Commercial,
-            $from,
-            OrderStatus::Completed->value,
-            $reason ?? 'Order completed',
-        );
-
-        return $order->fresh();
     }
 }

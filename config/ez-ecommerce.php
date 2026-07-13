@@ -97,6 +97,10 @@ return [
         'guest_ttl_days' => 30,
     ],
 
+    'orders' => [
+        'require_fulfillment_for_completion' => filter_var(env('COMMERCE_ORDERS_REQUIRE_FULFILLMENT', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
     'multi_store' => [
         'default_store_id' => env('COMMERCE_DEFAULT_STORE_ID'),
     ],

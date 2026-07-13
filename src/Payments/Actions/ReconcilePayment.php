@@ -41,32 +41,27 @@ final class ReconcilePayment
             ->where('external_event_id', $event->eventId)
             ->first();
 
-        if ($existing !== null && $existing->status === 'processed') {
+        if ($existing !== null && in_array($existing->status, ['processed', 'unmatched'], true)) {
             return $event;
         }
 
-        if (! $this->isSuccessfulCaptureEvent($request->gateway, $event->eventType)) {
-            if (! $this->isAuthorizationEvent($request->gateway, $event->eventType)) {
-                return $event;
-            }
-        }
-
-        $payment = $this->findPayment($event);
-        if ($payment === null) {
-            return $event;
-        }
-
+        $isCapture = $this->isSuccessfulCaptureEvent($request->gateway, $event->eventType);
         $isAuthorization = $this->isAuthorizationEvent($request->gateway, $event->eventType);
+        $isFailure = $this->isFailureEvent($request->gateway, $event->eventType);
+
+        if (! $isCapture && ! $isAuthorization && ! $isFailure) {
+            return $event;
+        }
 
         try {
-            DB::transaction(function () use ($request, $event, $payment, $isAuthorization) {
+            DB::transaction(function () use ($request, $event, $isAuthorization, $isFailure) {
                 $record = ProcessedGatewayEvent::query()
                     ->where('gateway', $request->gateway)
                     ->where('external_event_id', $event->eventId)
                     ->lockForUpdate()
                     ->first();
 
-                if ($record !== null && $record->status === 'processed') {
+                if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
                     return;
                 }
 
@@ -83,8 +78,22 @@ final class ReconcilePayment
                     $record->update(['status' => 'processing']);
                 }
 
+                $payment = $this->findPayment($event);
+                if ($payment === null) {
+                    $record->update(['status' => 'unmatched', 'processed_at' => $this->clock->now()]);
+
+                    return;
+                }
+
+                if ($isFailure) {
+                    $this->applyFailureTransition($payment, $event);
+                    $record->update(['status' => 'processed', 'processed_at' => $this->clock->now(), 'last_error' => null]);
+
+                    return;
+                }
+
                 if ($isAuthorization) {
-                    $payment = $this->applyAuthorization($payment, $event);
+                    $this->applyAuthorization($payment, $event);
                     $record->update([
                         'status' => 'processed',
                         'processed_at' => $this->clock->now(),
@@ -139,7 +148,7 @@ final class ReconcilePayment
                 ->where('external_event_id', $event->eventId)
                 ->first();
 
-            if ($record !== null && $record->status === 'processed') {
+            if ($record !== null && in_array($record->status, ['processed', 'unmatched'], true)) {
                 return $event;
             }
 
@@ -200,11 +209,75 @@ final class ReconcilePayment
         };
     }
 
+    private function isFailureEvent(string $gateway, string $eventType): bool
+    {
+        return match ($gateway) {
+            'stripe' => in_array($eventType, [
+                'payment_intent.payment_failed',
+                'payment_intent.canceled',
+            ], true),
+            'paypal' => in_array($eventType, [
+                'PAYMENT.CAPTURE.DENIED',
+                'PAYMENT.CAPTURE.REFUNDED',
+            ], true),
+            'fake' => in_array($eventType, [
+                'payment_intent.payment_failed',
+                'payment_intent.canceled',
+            ], true),
+            default => false,
+        };
+    }
+
+    private function applyFailureTransition(Payment $payment, GatewayWebhookEvent $event): void
+    {
+        $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+        // ponytail: Failure transitions are monotonic — never regress terminal states.
+        // Ceiling: a late failure webhook for an already-captured payment is ignored; the provider
+        // object should be retrieved before deciding on ambiguous cases.
+        // Upgrade: fetch the latest provider object for ambiguous states.
+        $terminal = [
+            PaymentStatus::Captured,
+            PaymentStatus::PartiallyCaptured,
+            PaymentStatus::Refunded,
+            PaymentStatus::PartiallyRefunded,
+            PaymentStatus::Cancelled,
+            PaymentStatus::Failed,
+        ];
+
+        if (in_array($locked->status, $terminal, true)) {
+            return;
+        }
+
+        $locked->update(['status' => PaymentStatus::Failed]);
+        $this->recalculateOrderPaymentStatus->execute($locked->order);
+    }
+
     private function applyAuthorization(Payment $payment, GatewayWebhookEvent $event): Payment
     {
         $locked = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
         if ($locked->status === PaymentStatus::Authorized) {
+            return $locked->fresh();
+        }
+
+        // ponytail: Authorization is monotonic — only advance from pre-authorization states.
+        // Ceiling: terminal states (Captured/Refunded/Cancelled/Failed) are never regressed by a
+        // late or out-of-order auth webhook; Stripe does not guarantee delivery order.
+        // Upgrade: retrieve the latest provider object before deciding on ambiguous states.
+        $allowedSources = [
+            PaymentStatus::Created,
+            PaymentStatus::Pending,
+            PaymentStatus::RequiresAction,
+        ];
+
+        if (! in_array($locked->status, $allowedSources, true)) {
+            return $locked->fresh();
+        }
+
+        // Never reactivate payment processing for an already-cancelled order.
+        $order = $locked->order;
+        if ($order !== null && $order->status === \EzEcommerce\Core\Enums\OrderStatus::Cancelled) {
             return $locked->fresh();
         }
 

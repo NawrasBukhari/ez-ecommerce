@@ -18,6 +18,12 @@ use RuntimeException;
 
 final class CancelOrder
 {
+    private const VOIDABLE_STATUSES = [
+        PaymentStatus::Authorized,
+        PaymentStatus::RequiresAction,
+        PaymentStatus::Pending,
+    ];
+
     public function __construct(
         private readonly RecordOrderTransition $recordOrderTransition,
         private readonly ReleaseInventoryReservation $releaseInventoryReservation,
@@ -30,6 +36,63 @@ final class CancelOrder
     {
         if ($order->status === OrderStatus::Cancelled) {
             return $order;
+        }
+
+        $this->assertCancellable($order);
+
+        $order->load('payments');
+
+        foreach ($order->payments as $payment) {
+            if (! $payment instanceof Payment) {
+                continue;
+            }
+
+            if (! in_array($payment->status, self::VOIDABLE_STATUSES, true)) {
+                continue;
+            }
+
+            $gateway = $this->gateways->for($payment->gateway);
+            if (! $gateway->capabilities()->void) {
+                // No provider session to cancel (manual/null gateways); skip voiding.
+                continue;
+            }
+
+            $this->voidPaymentAuthorization->execute($payment, "void:{$payment->public_id}");
+        }
+
+        return DB::transaction(function () use ($order, $reason): Order {
+            $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
+
+            $this->assertCancellable($locked);
+
+            $from = $locked->status->value;
+
+            $locked->reservations()
+                ->where('status', ReservationStatus::Active)
+                ->get()
+                ->each(fn ($reservation) => $this->releaseInventoryReservation->execute($reservation));
+
+            $locked->update([
+                'status' => OrderStatus::Cancelled,
+                'fulfillment_status' => FulfillmentStatus::Cancelled,
+            ]);
+
+            $this->recordOrderTransition->execute(
+                $locked,
+                TransitionDimension::Commercial,
+                $from,
+                OrderStatus::Cancelled->value,
+                $reason ?? 'Order cancelled',
+            );
+
+            return $locked->fresh();
+        });
+    }
+
+    private function assertCancellable(Order $order): void
+    {
+        if ($order->status === OrderStatus::Cancelled) {
+            return;
         }
 
         if (in_array($order->status, [OrderStatus::Completed], true)) {
@@ -47,48 +110,5 @@ final class CancelOrder
         if (in_array($order->payment_status, [OrderPaymentStatus::Paid, OrderPaymentStatus::PartiallyPaid], true)) {
             throw new RuntimeException('Paid orders must be refunded before cancellation.');
         }
-
-        $order->load('payments');
-
-        foreach ($order->payments as $payment) {
-            if (! $payment instanceof Payment) {
-                continue;
-            }
-
-            if ($payment->status !== PaymentStatus::Authorized) {
-                continue;
-            }
-
-            $gateway = $this->gateways->for($payment->gateway);
-            if (! $gateway->capabilities()->void) {
-                throw new RuntimeException('Authorized payment requires a gateway that supports voiding before cancellation.');
-            }
-
-            $this->voidPaymentAuthorization->execute($payment, "void:{$payment->public_id}");
-        }
-
-        return DB::transaction(function () use ($order, $reason): Order {
-            $from = $order->status->value;
-
-            $order->reservations()
-                ->where('status', ReservationStatus::Active)
-                ->get()
-                ->each(fn ($reservation) => $this->releaseInventoryReservation->execute($reservation));
-
-            $order->update([
-                'status' => OrderStatus::Cancelled,
-                'fulfillment_status' => FulfillmentStatus::Cancelled,
-            ]);
-
-            $this->recordOrderTransition->execute(
-                $order,
-                TransitionDimension::Commercial,
-                $from,
-                OrderStatus::Cancelled->value,
-                $reason ?? 'Order cancelled',
-            );
-
-            return $order->fresh();
-        });
     }
 }

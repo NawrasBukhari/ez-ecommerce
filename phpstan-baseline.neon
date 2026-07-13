@@ -217,16 +217,40 @@ parameters:
 			path: src/Checkout/Actions/PlaceOrder.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Checkout/Actions/PlaceOrder.php
-
-		-
 			message: '#^Call to function is_array\(\) with array\<string, mixed\> will always evaluate to true\.$#'
 			identifier: function.alreadyNarrowedType
 			count: 1
 			path: src/Checkout/Actions/PlaceOrder.php
+
+		-
+			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$cnt\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Commands/DedupeTransactionsCommand.php
+
+		-
+			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$keep_id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Commands/DedupeTransactionsCommand.php
+
+		-
+			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$payment_id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Commands/DedupeTransactionsCommand.php
+
+		-
+			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentTransaction\:\:\$type\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Commands/DedupeTransactionsCommand.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,EzEcommerce\\Payments\\Models\\PaymentTransaction\>\:\:map\(\) contains unresolvable type\.$#'
+			identifier: argument.unresolvableType
+			count: 1
+			path: src/Commands/DedupeTransactionsCommand.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Core\\Models\\IdempotencyRecord\:\:\$attempts\.$#'
@@ -589,12 +613,6 @@ parameters:
 			path: src/Orders/Actions/RecalculateOrderPaymentStatus.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Actions/FinalizeAcceptedPayment.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 4
@@ -607,22 +625,10 @@ parameters:
 			path: src/Payments/Drivers/ManualPaymentGateway.php
 
 		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Payments/Drivers/StripePaymentGateway.php
-
-		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
 			identifier: property.notFound
 			count: 1
 			path: src/Payments/Drivers/StripePaymentGateway.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Payments/Drivers/TelrPaymentGateway.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Payments\\Models\\PaymentAttempt\:\:\$public_id\.$#'
@@ -641,12 +647,6 @@ parameters:
 			identifier: property.notFound
 			count: 1
 			path: src/Pricing/DefaultPriceResolver.php
-
-		-
-			message: '#^Access to an undefined property EzEcommerce\\Orders\\Models\\Order\:\:\$public_id\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Refunds/Actions/RefundPayment.php
 
 		-
 			message: '#^Access to an undefined property EzEcommerce\\Refunds\\Models\\Refund\:\:\$public_id\.$#'

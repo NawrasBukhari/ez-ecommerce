@@ -4,6 +4,7 @@ namespace EzEcommerce\Payments\Actions;
 
 use EzEcommerce\Core\Enums\PaymentStatus;
 use EzEcommerce\Core\Events\OrderPaid;
+use EzEcommerce\Core\Models\OutboxMessage;
 use EzEcommerce\Inventory\Actions\CommitReservation;
 use EzEcommerce\Inventory\Exceptions\InventoryCommitException;
 use EzEcommerce\Inventory\Exceptions\ReservationExpiredException;
@@ -11,6 +12,7 @@ use EzEcommerce\Orders\Actions\ConfirmOrderOnPaymentAccepted;
 use EzEcommerce\Orders\Actions\RecalculateOrderPaymentStatus;
 use EzEcommerce\Payments\Models\Payment;
 use EzEcommerce\Payments\Models\PaymentAttempt;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Event;
 
 final class FinalizeAcceptedPayment
@@ -71,14 +73,23 @@ final class FinalizeAcceptedPayment
             $this->commitReservation->executeForOrder($order);
             $this->confirmOrderOnPaymentAccepted->execute($order);
 
-            $metadata = $order->metadata instanceof \ArrayObject
-                ? $order->metadata->getArrayCopy()
-                : (array) ($order->metadata ?? []);
+            // Exactly-once OrderPaid via a unique outbox row keyed on order.paid:{order_id}.
+            // Two concurrent finalizers race on the unique constraint; the loser skips dispatch.
+            // A crash after insert but before commit rolls the row back, so recovery re-dispatches.
+            try {
+                OutboxMessage::query()->create([
+                    'event' => 'order.paid',
+                    'key' => "order.paid:{$order->id}",
+                    'payload' => [
+                        'order_id' => $order->id,
+                        'order_public_id' => $order->public_id,
+                        'payment_id' => $payment->id,
+                    ],
+                ]);
 
-            if (! ($metadata['order_paid_dispatched'] ?? false)) {
                 Event::dispatch(new OrderPaid($order->id, $order->public_id, $payment->id));
-                $metadata['order_paid_dispatched'] = true;
-                $order->update(['metadata' => $metadata]);
+            } catch (UniqueConstraintViolationException) {
+                // Already dispatched by a concurrent finalizer or a prior recovery.
             }
 
             return;
